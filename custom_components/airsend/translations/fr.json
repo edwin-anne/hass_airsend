@@ -125,7 +125,7 @@
       },
       "capture_ready": {
         "title": "Capturer une télécommande",
-        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande dans les {seconds} secondes, près du boîtier AirSend. En mode « code fixe », cette télécommande est utilisée telle quelle."
+        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande dans les {seconds} secondes, près du boîtier AirSend. Cette télécommande sera utilisée telle quelle (code fixe)."
       },
       "capture": {
         "title": "Écoute"
@@ -178,6 +178,13 @@
       "capture_ready_model": {
         "title": "Capturer une télécommande",
         "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande existante dans les {seconds} secondes, près du boîtier AirSend. Elle sert uniquement de MODÈLE pour créer un nouvel émetteur indépendant (code tournant géré) ; elle n'est pas enregistrée."
+      },
+      "capture_choose": {
+        "title": "Plusieurs télécommandes entendues",
+        "description": "Choisissez la télécommande que vous venez d'actionner. La plus fréquente et la plus forte est en premier. Chaque ligne indique : protocole - fin de l'adresse - nombre de trames.",
+        "data": {
+          "candidate": "Télécommande"
+        }
       }
     },
     "progress": {
@@ -191,7 +198,6 @@
       "server_error": "L'addon a renvoyé une erreur.",
       "bad_response": "Réponse inattendue de l'addon (l'API d'appairage peut différer selon votre version).",
       "no_frame": "Aucune trame radio valide reçue ({diagnostic}). Réessayez plus près du boîtier.",
-      "multiple_frames": "Plusieurs télécommandes différentes ont été entendues. Réessayez avec une seule à proximité.",
       "name_invalid": "Nom vide ou déjà utilisé.",
       "pin_mismatch": "Les deux saisies du PIN sont différentes.",
       "weak_pin": "Le PIN doit comporter 6 à 8 chiffres et ne pas être une suite triviale.",

@@ -141,6 +141,36 @@ def summarize_events(events: list[dict]) -> str:
     )
 
 
+def rank_candidates(events: list[dict], loose: bool = False) -> list[tuple[dict, int, float | None]]:
+    """Count frames per distinct channel: [(channel, hits, best_reliability)].
+
+    Sorted most frames first, then best reliability: the remote held next to
+    the box is usually the first one. ``loose`` uses the relaxed filter.
+    """
+    stats: dict[tuple, list] = {}
+    for event in events or []:
+        found = pick_loose_candidates([event]) if loose else pick_candidates([event])
+        if not found:
+            continue
+        channel = found[0]
+        rel = event.get("reliability", (event.get("channel") or {}).get("reliability"))
+        rel = rel if isinstance(rel, (int, float)) else None
+        key = tuple(channel.get(k) for k in ("id", "source", "mac", "seed"))
+        entry = stats.setdefault(key, [channel, 0, None])
+        entry[1] += 1
+        if rel is not None and (entry[2] is None or rel > entry[2]):
+            entry[2] = rel
+    ranked = sorted(stats.values(), key=lambda e: (-e[1], -(e[2] if e[2] is not None else -1)))
+    return [(c, n, r) for c, n, r in ranked]
+
+
+def describe_candidate(channel: dict, hits: int, protocol_name: str | None = None) -> str:
+    """Label for a heard remote that never exposes its full address."""
+    source = str(channel.get("source", ""))
+    tail = "..." + source[-4:] if source else "?"
+    return f"{protocol_name or channel.get('id')} \u00b7 {tail} \u00b7 x{hits}"
+
+
 class AirSendApi:
     """Thin async client (one instance per wizard run)."""
 
@@ -151,6 +181,7 @@ class AirSendApi:
         self._ssl = False if self._base.startswith("https://") else None
         self.diagnostic = ""
         self.used_fallback = False
+        self.candidate_hits: list[int] = []
 
     async def _request(self, method: str, path: str, body: Any = None, auth: bool = True,
                        timeout: float = 8) -> Any:
@@ -301,10 +332,11 @@ class AirSendApi:
                 _LOGGER.debug("unbind failed after capture")
         self.diagnostic = summarize_events(all_events)
         _LOGGER.debug("AirSend capture finished: %s", self.diagnostic)
-        if strict:
-            return list(strict.values())
-        loose = pick_loose_candidates(all_events)
-        if loose:
-            self.used_fallback = True
-            _LOGGER.debug("AirSend capture: no strict GOT frame, using %d loose candidate(s)", len(loose))
-        return loose
+        ranked = rank_candidates(all_events)
+        if not ranked:
+            ranked = rank_candidates(all_events, loose=True)
+            if ranked:
+                self.used_fallback = True
+                _LOGGER.debug("AirSend capture: no strict GOT frame, using %d loose candidate(s)", len(ranked))
+        self.candidate_hits = [hits for _c, hits, _r in ranked]
+        return [channel for channel, _hits, _r in ranked]

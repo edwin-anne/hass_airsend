@@ -159,6 +159,9 @@ Natively paired devices survive a YAML reconfiguration.
 ### Audit and alerts
 The vault fires `airsend_vault_event` on the Home Assistant event bus: `sealed`, `unlocked`, `command_authorized`, `pin_failed`, `pin_locked`, `pin_changed`, `removed` (fields `type`, `device`; never the PIN or secrets). Three or more wrong PINs raise a persistent notification. Use these events for mobile notifications.
 
+### Several remotes heard
+If more than one transmitter is heard (neighbours, other remotes, sensors), the wizard lists them instead of failing: the most frequent and strongest first, each line showing the protocol, only the **end** of the address and the number of frames. Pick the one you pressed, or choose "Recommencer / Retry".
+
 ### If the capture finds nothing
 The error now lists what the service sent (event count, types, channel ids, reliability; never addresses). During a capture the integration listens both by polling `GET /airsend/events` and through a temporary local webhook given to the service as callback (removed afterwards), and it falls back to a relaxed frame filter. Afterwards it refreshes the box listener. For a bug report, enable debug logging (`logger: logs: custom_components.airsend: debug`) and send the error text plus the `AirSend capture finished` log line.
 

@@ -28,6 +28,8 @@ from .enroll import (
     PROG_NOTE,
     AirSendApi,
     AirSendApiError,
+    describe_candidate,
+    normalize_protocol,
 )
 from .vault import InvalidPin, PinLocked, WeakPin
 from .vault_store import get_vault_manager
@@ -62,6 +64,8 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         self._pending_device: dict | None = None
         self._capture_error: str | None = None
         self._capture_api: AirSendApi | None = None
+        self._candidates: list[dict] = []
+        self._candidate_labels: dict[str, str] = {}
         self._diagnostic = ""
         self._webhook_id: str | None = None
 
@@ -234,18 +238,58 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
                 "AirSend capture used the relaxed frame filter (%s)", self._diagnostic
             )
         if len(candidates) > 1:
-            self._capture_error = "multiple_frames"
-            return await self.async_step_capture_ready()
+            return await self._async_prepare_choice(candidates)
+        return await self._async_use_candidate(candidates[0])
+
+    async def _async_prepare_choice(self, candidates: list[dict]):
+        """Several remotes were heard: let the user pick (best guess first)."""
+        names: dict = {}
+        try:
+            for info in await self._api().list_channels():
+                proto = normalize_protocol(info)
+                names[proto["id"]] = proto["name"]
+        except AirSendApiError:
+            pass
+        hits = self._capture_api.candidate_hits if self._capture_api else []
+        self._candidates = candidates
+        self._candidate_labels = {
+            str(i): describe_candidate(
+                c, hits[i] if i < len(hits) else 1, names.get(c.get("id"))
+            )
+            for i, c in enumerate(candidates)
+        }
+        return await self.async_step_capture_choose()
+
+    async def async_step_capture_choose(self, user_input=None):
+        if user_input is not None:
+            choice = user_input["candidate"]
+            if choice == "retry":
+                self._candidates = []
+                return await self.async_step_capture_ready()
+            channel = self._candidates[int(choice)]
+            self._candidates = []
+            return await self._async_use_candidate(channel)
+        options = list(self._candidate_labels.items()) + [("retry", "Recommencer / Retry")]
+        return self.async_show_form(
+            step_id="capture_choose",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("candidate", default="0"): _select(options)
+                }
+            ),
+        )
+
+    async def _async_use_candidate(self, channel: dict):
         if self._mode == "virtual":
             # The captured remote is only a MODEL for /channels/build: never stored.
-            self._model = candidates[0]
+            self._model = channel
             self._channel = None
             info = await self._api().protocol_info(self._model["id"])
             if info is not None and info["cloneable"] is False:
                 self._model = None
                 return self.async_abort(reason="not_cloneable")
             return await self.async_step_virtual_prog()
-        self._channel = candidates[0]
+        self._channel = channel
         return await self.async_step_device()
 
     # -- mode B: virtual transmitter ------------------------------------

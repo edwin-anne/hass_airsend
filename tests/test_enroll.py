@@ -273,3 +273,36 @@ def test_protocol_info_lookup():
         assert await api.protocol_info(999) is None
 
     run(with_api({}, go))
+
+
+def _got(source, rel=20, id_=808):
+    return {"type": 3, "reliability": rel, "channel": {"id": id_, "source": source}}
+
+
+def test_rank_candidates_orders_by_frames_then_reliability():
+    events = [_got(111, 10), _got(222, 30), _got(222, 25), _got(222, 28), _got(333, 40), _got(333, 12)]
+    ranked = enroll.rank_candidates(events)
+    assert [c["source"] for c, _h, _r in ranked] == [222, 333, 111]
+    assert [h for _c, h, _r in ranked] == [3, 2, 1]
+    assert ranked[0][2] == 30 and ranked[1][2] == 40
+
+
+def test_capture_returns_sorted_candidates_and_hits():
+    state = {"events": [_got(111, 10), _got(222, 30), _got(222, 25)]}
+    holder = {}
+
+    async def go(api):
+        result = await api.capture(window=1.5, settle=0.2, poll=0.05)
+        holder["hits"] = api.candidate_hits
+        return result
+
+    result = run(with_api(state, go))
+    assert [c["source"] for c in result][0] == 222
+    assert holder["hits"][0] >= holder["hits"][1]
+    assert len(result) == 2
+
+
+def test_describe_candidate_masks_address():
+    label = enroll.describe_candidate({"id": 808, "source": 987654321}, 3, "EV1527")
+    assert "987654321" not in label and "4321" in label and "x3" in label and "EV1527" in label
+    assert enroll.describe_candidate({"id": 5}, 1) .startswith("5 ")

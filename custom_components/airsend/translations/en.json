@@ -125,7 +125,7 @@
       },
       "capture_ready": {
         "title": "Capture a remote",
-        "description": "Click Submit, then press ONE button of your remote within {seconds} seconds, close to the AirSend box. In 'fixed code' mode this remote is used as is."
+        "description": "Click Submit, then press ONE button of your remote within {seconds} seconds, close to the AirSend box. This remote will be used as is (fixed code)."
       },
       "capture": {
         "title": "Listening"
@@ -178,6 +178,13 @@
       "capture_ready_model": {
         "title": "Capture a remote",
         "description": "Click Submit, then press ONE button of your existing remote within {seconds} seconds, close to the AirSend box. It is only used as a MODEL to create a new, independent transmitter (rolling code supported); it is not stored."
+      },
+      "capture_choose": {
+        "title": "Several remotes heard",
+        "description": "Pick the remote you just pressed. The most frequent and strongest one is listed first. Each line shows: protocol - end of the address - number of frames.",
+        "data": {
+          "candidate": "Remote"
+        }
       }
     },
     "progress": {
@@ -191,7 +198,6 @@
       "server_error": "The add-on returned an error.",
       "bad_response": "Unexpected answer from the add-on (the pairing API may differ on your version).",
       "no_frame": "No valid radio frame received ({diagnostic}). Try again closer to the box.",
-      "multiple_frames": "Several different remotes were heard. Retry with only one remote nearby.",
       "name_invalid": "Name empty or already used.",
       "pin_mismatch": "The two PIN entries differ.",
       "weak_pin": "PIN must be 6 to 8 digits and not a trivial sequence.",
