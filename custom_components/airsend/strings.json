@@ -125,7 +125,7 @@
       },
       "capture_ready": {
         "title": "Capture a remote",
-        "description": "Click Submit, then press ONE button of your remote within {seconds} seconds, close to the AirSend box. This remote will be used as is (fixed code)."
+        "description": "Click Submit, then press ONE button of your remote within {seconds} seconds, close to the AirSend box. This remote will be used as is (fixed code).\n\n{diagnostic}"
       },
       "capture": {
         "title": "Listening"
@@ -177,7 +177,7 @@
       },
       "capture_ready_model": {
         "title": "Capture a remote",
-        "description": "Click Submit, then press ONE button of your existing remote within {seconds} seconds, close to the AirSend box. It is only used as a MODEL to create a new, independent transmitter (rolling code supported); it is not stored."
+        "description": "Click Submit, then press ONE button of your existing remote within {seconds} seconds, close to the AirSend box. It is only used as a MODEL to create a new, independent transmitter (rolling code supported); it is not stored.\n\n{diagnostic}"
       },
       "capture_choose": {
         "title": "Several remotes heard",

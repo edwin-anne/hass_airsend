@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
+import traceback
 
 import voluptuous as vol
 
@@ -224,9 +226,38 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_progress_done(next_step_id="capture_done")
 
     def _unexpected(self, err: Exception) -> str:
-        """Log an unexpected error and keep a short, secret-free diagnostic."""
+        """Log an unexpected error; keep a diagnostic independent of translations.
+
+        The diagnostic holds the exception name/message and where it happened
+        (file:line in this integration only). A persistent notification shows
+        the same text in the UI. No channel, spurl or PIN is ever included.
+        """
         _LOGGER.exception("AirSend pairing step failed")
-        self._diagnostic = f"{type(err).__name__}: {err}"[:200]
+        package_dir = os.path.dirname(os.path.abspath(__file__))
+        frames = [
+            f for f in traceback.extract_tb(err.__traceback__)
+            if os.path.abspath(f.filename).startswith(package_dir)
+        ]
+        where = ""
+        if frames:
+            last = frames[-1]
+            where = f" @ {os.path.basename(last.filename)}:{last.lineno} in {last.name}"
+        self._diagnostic = f"{type(err).__name__}: {err}{where}"[:300]
+        trace = "\n".join(
+            f"- {os.path.basename(f.filename)}:{f.lineno} in {f.name}" for f in frames
+        )
+        try:
+            from homeassistant.components import persistent_notification
+
+            persistent_notification.async_create(
+                self.hass,
+                f"{self._diagnostic}\n\n{trace}\n\n"
+                "Please include this text in your bug report.",
+                title="AirSend pairing error",
+                notification_id="airsend_pairing_error",
+            )
+        except Exception:  # noqa: BLE001 - diagnostics must never raise
+            _LOGGER.debug("Could not create the pairing error notification", exc_info=True)
         return "unknown"
 
     async def _async_resume_after_capture(self):

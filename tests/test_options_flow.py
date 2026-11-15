@@ -53,6 +53,12 @@ def of():
     _stub("homeassistant.core", callback=lambda f: f, CALLBACK_TYPE=object, HomeAssistant=object)
     _stub("homeassistant.exceptions", ServiceValidationError=Exception)
     _stub("homeassistant.helpers")
+    notif = MagicMock()
+    _stub("homeassistant.components")
+    _stub("homeassistant.components.persistent_notification", async_create=notif)
+    sys.modules["homeassistant.components"].persistent_notification = sys.modules[
+        "homeassistant.components.persistent_notification"
+    ]
     _stub("homeassistant.helpers.aiohttp_client", async_get_clientsession=lambda hass: MagicMock())
     _stub("homeassistant.helpers.dispatcher", async_dispatcher_send=MagicMock())
     _stub("homeassistant.helpers.event", async_call_later=MagicMock())
@@ -70,6 +76,7 @@ def of():
     pkg.DOMAIN = "airsend"
     sys.modules["airsendpkg"] = pkg
     module = importlib.import_module("airsendpkg.options_flow")
+    module._test_notification = notif
     yield module
     for key in list(sys.modules):
         if key not in saved:
@@ -161,3 +168,21 @@ def test_virtual_mode_uses_candidate_as_model(of):
     result = run(flow._async_use_candidate({"id": 808, "source": 7}))
     assert result["step_id"] == "virtual_prog"
     assert flow._model == {"id": 808, "source": 7} and flow._channel is None
+
+
+def test_unexpected_error_gives_location_and_notification(of, monkeypatch):
+    def boom(*_a, **_k):
+        raise ValueError("kaboom")
+
+    monkeypatch.setattr(of, "describe_candidate", boom)
+    of._test_notification.reset_mock()
+    flow = make_flow(of)
+    flow._task = done_task([{"id": 808, "source": 111111}, {"id": 808, "source": 222222}])
+    flow._capture_api = MagicMock(diagnostic="", used_fallback=False, candidate_hits=[1, 1])
+    result = run(flow.async_step_capture_done())
+    assert result["step_id"] == "capture_ready" and result["errors"] == {"base": "unknown"}
+    diag = result["description_placeholders"]["diagnostic"]
+    assert "ValueError: kaboom" in diag and "options_flow.py:" in diag and "_async_prepare_choice" in diag
+    assert of._test_notification.call_count == 1
+    text = of._test_notification.call_args.args[1]
+    assert "kaboom" in text and "111111" not in text and "sp://" not in text

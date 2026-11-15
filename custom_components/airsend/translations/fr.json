@@ -125,7 +125,7 @@
       },
       "capture_ready": {
         "title": "Capturer une télécommande",
-        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande dans les {seconds} secondes, près du boîtier AirSend. Cette télécommande sera utilisée telle quelle (code fixe)."
+        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande dans les {seconds} secondes, près du boîtier AirSend. Cette télécommande sera utilisée telle quelle (code fixe).\n\n{diagnostic}"
       },
       "capture": {
         "title": "Écoute"
@@ -177,7 +177,7 @@
       },
       "capture_ready_model": {
         "title": "Capturer une télécommande",
-        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande existante dans les {seconds} secondes, près du boîtier AirSend. Elle sert uniquement de MODÈLE pour créer un nouvel émetteur indépendant (code tournant géré) ; elle n'est pas enregistrée."
+        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande existante dans les {seconds} secondes, près du boîtier AirSend. Elle sert uniquement de MODÈLE pour créer un nouvel émetteur indépendant (code tournant géré) ; elle n'est pas enregistrée.\n\n{diagnostic}"
       },
       "capture_choose": {
         "title": "Plusieurs télécommandes entendues",
