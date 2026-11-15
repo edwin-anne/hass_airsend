@@ -193,7 +193,7 @@
       "invalid_input": "The add-on refused the request.",
       "server_error": "The add-on returned an error.",
       "bad_response": "Unexpected answer from the add-on (the pairing API may differ on your version).",
-      "no_frame": "No valid radio frame received. Try again closer to the box.",
+      "no_frame": "No valid radio frame received ({diagnostic}). Try again closer to the box.",
       "multiple_frames": "Several different remotes were heard. Retry with only one remote nearby.",
       "name_invalid": "Name empty or already used.",
       "pin_mismatch": "The two PIN entries differ.",

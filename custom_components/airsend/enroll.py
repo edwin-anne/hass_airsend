@@ -68,6 +68,53 @@ def pick_candidates(events: list[dict]) -> list[dict]:
     return list(found.values())
 
 
+def pick_loose_candidates(events: list[dict]) -> list[dict]:
+    """Fallback: any non-error event carrying a channel id and source.
+
+    Used only when no event passed the strict GOT / reliability filter, so a
+    firmware that labels events differently still works. Errors (type >= 256)
+    are ignored.
+    """
+    found: dict[tuple, dict] = {}
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        etype = event.get("type")
+        if isinstance(etype, int) and etype >= 0x100:
+            continue
+        channel = event.get("channel")
+        if not isinstance(channel, dict) or "id" not in channel or "source" not in channel:
+            continue
+        clean = normalize_channel(channel)
+        key = tuple(clean.get(k) for k in ("id", "source", "mac", "seed"))
+        found.setdefault(key, clean)
+    return list(found.values())
+
+
+def summarize_events(events: list[dict]) -> str:
+    """Secret-free description of what the service sent (for error messages/logs)."""
+    if not events:
+        return "no event received from the service"
+    types: dict[str, int] = {}
+    ids: set = set()
+    reliabilities: set = set()
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        types[str(event.get("type"))] = types.get(str(event.get("type")), 0) + 1
+        channel = event.get("channel")
+        if isinstance(channel, dict):
+            if "id" in channel:
+                ids.add(channel["id"])
+            rel = event.get("reliability", channel.get("reliability"))
+            if rel is not None:
+                reliabilities.add(rel)
+    return (
+        f"{len(events)} event(s); types={dict(sorted(types.items()))}; "
+        f"channel ids={sorted(ids, key=str)}; reliability={sorted(reliabilities, key=str)}"
+    )
+
+
 class AirSendApi:
     """Thin async client (one instance per wizard run)."""
 
@@ -76,6 +123,8 @@ class AirSendApi:
         self._base = base_url if base_url.endswith("/") else base_url + "/"
         self._spurl = spurl
         self._ssl = False if self._base.startswith("https://") else None
+        self.diagnostic = ""
+        self.used_fallback = False
 
     async def _request(self, method: str, path: str, body: Any = None, auth: bool = True,
                        timeout: float = 8) -> Any:
@@ -125,9 +174,13 @@ class AirSendApi:
             raise AirSendApiError("bad_response")
         return channel
 
-    async def bind(self) -> None:
-        """Listen indefinitely; the caller bounds the window and calls unbind()."""
-        await self._request("POST", "airsend/bind", {"duration": 0, "callback": None})
+    async def bind(self, callback: str = "http://127.0.0.1/") -> None:
+        """Listen indefinitely; the caller bounds the window and calls unbind().
+
+        A callback is always sent (a dummy one by default) like every known
+        client of the service does.
+        """
+        await self._request("POST", "airsend/bind", {"duration": 0, "callback": callback})
 
     async def unbind(self) -> None:
         await self._request("GET", "airsend/unbind")
@@ -144,20 +197,44 @@ class AirSendApi:
             timeout=12,
         )
 
-    async def capture(self, window: float = 60, settle: float = 2.0, poll: float = 1.0) -> list[dict]:
+    async def capture(
+        self,
+        window: float = 60,
+        settle: float = 2.0,
+        poll: float = 1.0,
+        callback: str = "http://127.0.0.1/",
+        inbox: list | None = None,
+    ) -> list[dict]:
         """Listen for a remote for ``window`` seconds and return distinct channels.
 
-        Stops ``settle`` seconds after the first valid frame so a single button
-        press is enough. Always unbinds, even on error.
+        Events come from polling ``GET /airsend/events`` and, when given, from
+        ``inbox`` (filled by a webhook registered as the bind callback). All
+        events are accumulated: the service may drain its buffer on read.
+        Stops ``settle`` seconds after the first valid frame. Always unbinds.
+        ``self.diagnostic`` describes what was seen.
         """
-        await self.bind()
+        self.used_fallback = False
+        await self.bind(callback)
         deadline = time.monotonic() + window
         first_seen: float | None = None
-        candidates: list[dict] = []
+        all_events: list[dict] = []
+        strict: dict[tuple, dict] = {}
         try:
             while time.monotonic() < deadline:
-                candidates = pick_candidates(await self.events())
-                if candidates and first_seen is None:
+                try:
+                    new_events = await self.events()
+                except AirSendApiError as err:
+                    if err.code in ("invalid_spurl", "cannot_connect"):
+                        raise
+                    new_events = []
+                if inbox:
+                    new_events = new_events + list(inbox)
+                    inbox.clear()
+                all_events.extend(new_events)
+                for cand in pick_candidates(new_events):
+                    key = tuple(cand.get(k) for k in ("id", "source", "mac", "seed"))
+                    strict.setdefault(key, cand)
+                if strict and first_seen is None:
                     first_seen = time.monotonic()
                 if first_seen is not None and time.monotonic() - first_seen >= settle:
                     break
@@ -167,4 +244,12 @@ class AirSendApi:
                 await self.unbind()
             except AirSendApiError:
                 _LOGGER.debug("unbind failed after capture")
-        return candidates
+        self.diagnostic = summarize_events(all_events)
+        _LOGGER.debug("AirSend capture finished: %s", self.diagnostic)
+        if strict:
+            return list(strict.values())
+        loose = pick_loose_candidates(all_events)
+        if loose:
+            self.used_fallback = True
+            _LOGGER.debug("AirSend capture: no strict GOT frame, using %d loose candidate(s)", len(loose))
+        return loose

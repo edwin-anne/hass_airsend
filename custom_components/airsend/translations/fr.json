@@ -193,7 +193,7 @@
       "invalid_input": "L'addon a refusé la requête.",
       "server_error": "L'addon a renvoyé une erreur.",
       "bad_response": "Réponse inattendue de l'addon (l'API d'appairage peut différer selon votre version).",
-      "no_frame": "Aucune trame radio valide reçue. Réessayez plus près du boîtier.",
+      "no_frame": "Aucune trame radio valide reçue ({diagnostic}). Réessayez plus près du boîtier.",
       "multiple_frames": "Plusieurs télécommandes différentes ont été entendues. Réessayez avec une seule à proximité.",
       "name_invalid": "Nom vide ou déjà utilisé.",
       "pin_mismatch": "Les deux saisies du PIN sont différentes.",

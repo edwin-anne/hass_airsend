@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 
 import voluptuous as vol
 
+from aiohttp import web
+
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.const import CONF_INTERNAL_URL
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
@@ -58,6 +62,9 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         self._task: asyncio.Task | None = None
         self._pending_device: dict | None = None
         self._capture_error: str | None = None
+        self._capture_api: AirSendApi | None = None
+        self._diagnostic = ""
+        self._webhook_id: str | None = None
 
     # -- helpers ---------------------------------------------------------
     def _api(self) -> AirSendApi:
@@ -84,6 +91,60 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         )
         await self.hass.config_entries.async_reload(self.config_entry.entry_id)
         return self.async_create_entry(data={})
+
+    @callback
+    def async_remove(self) -> None:
+        """Flow closed: stop listening and drop the temporary webhook."""
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._unregister_webhook()
+
+    def _unregister_webhook(self) -> None:
+        if self._webhook_id:
+            from homeassistant.components import webhook
+
+            webhook.async_unregister(self.hass, self._webhook_id)
+            self._webhook_id = None
+
+    def _register_webhook(self, inbox: list) -> str:
+        """Register a temporary webhook used as the bind callback.
+
+        Returns the callback URL, or the dummy callback when no internal URL is
+        available. The webhook id is random and removed when the capture ends.
+        """
+        from homeassistant.components import webhook
+        from homeassistant.helpers.network import NoURLAvailableError, get_url
+
+        async def _handle(hass, webhook_id, request):
+            try:
+                body = await request.json()
+            except Exception:  # noqa: BLE001
+                return web.Response(status=400)
+            events = body.get("events") if isinstance(body, dict) else None
+            if isinstance(events, list):
+                inbox.extend(e for e in events if isinstance(e, dict))
+            return web.Response(status=200)
+
+        try:
+            base = get_url(self.hass, allow_external=False, allow_cloud=False)
+        except NoURLAvailableError:
+            return "http://127.0.0.1/"
+        webhook_id = secrets.token_hex(16)
+        webhook.async_register(
+            self.hass, DOMAIN, "AirSend pairing", webhook_id, _handle, local_only=True
+        )
+        self._webhook_id = webhook_id
+        return base.rstrip("/") + webhook.async_generate_path(webhook_id)
+
+    async def _async_rebind_box(self) -> None:
+        """Our bind/unbind may have replaced the box listener: restore it."""
+        data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
+        for coordinator in data.get("coordinators", {}).values():
+            try:
+                if coordinator.device.is_airsend:
+                    await coordinator.async_request_refresh()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Could not refresh box listener", exc_info=True)
 
     # -- menu ------------------------------------------------------------
     async def async_step_init(self, user_input=None):
@@ -130,15 +191,24 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="capture_ready",
             data_schema=vol.Schema({}),
-            description_placeholders={"seconds": str(CAPTURE_WINDOW_SECONDS)},
+            description_placeholders={
+                "seconds": str(CAPTURE_WINDOW_SECONDS),
+                "diagnostic": self._diagnostic,
+            },
             errors={"base": self._capture_error} if self._capture_error else {},
         )
 
     async def async_step_capture(self, user_input=None):
         if self._task is None:
             self._capture_error = None
+            self._diagnostic = ""
+            inbox: list = []
+            callback_url = self._register_webhook(inbox)
+            self._capture_api = self._api()
             self._task = self.hass.async_create_task(
-                self._api().capture(window=CAPTURE_WINDOW_SECONDS)
+                self._capture_api.capture(
+                    window=CAPTURE_WINDOW_SECONDS, callback=callback_url, inbox=inbox
+                )
             )
         if not self._task.done():
             return self.async_show_progress(
@@ -148,6 +218,9 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_capture_done(self, user_input=None):
         task, self._task = self._task, None
+        self._unregister_webhook()
+        await self._async_rebind_box()
+        self._diagnostic = self._capture_api.diagnostic if self._capture_api else ""
         try:
             candidates = task.result()
         except AirSendApiError as err:
@@ -156,6 +229,10 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         if not candidates:
             self._capture_error = "no_frame"
             return await self.async_step_capture_ready()
+        if self._capture_api and self._capture_api.used_fallback:
+            _LOGGER.warning(
+                "AirSend capture used the relaxed frame filter (%s)", self._diagnostic
+            )
         if len(candidates) > 1:
             self._capture_error = "multiple_frames"
             return await self.async_step_capture_ready()

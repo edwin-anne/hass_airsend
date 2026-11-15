@@ -52,6 +52,9 @@ def make_app(state):
     async def events(request):
         need_auth(request)
         state["polls"] = state.get("polls", 0) + 1
+        if "queue" in state:  # draining buffer: each batch is returned only once
+            batch = state["queue"].pop(0) if state["queue"] else []
+            return web.json_response(batch)
         return web.json_response(state.get("events", []))
 
     async def transfer(request):
@@ -156,3 +159,69 @@ def test_send_prog_payload():
         "wait": True, "channel": {"id": 808, "source": 5},
         "thingnotes": {"notes": [{"method": 1, "type": 0, "value": "PROG"}]},
     }
+
+
+def test_capture_keeps_frame_when_service_drains_its_buffer():
+    frame = {"type": 3, "reliability": 20, "channel": {"id": 808, "source": 77}}
+    state = {"queue": [[frame], [], [], [], []]}
+
+    async def go(api):
+        return await api.capture(window=2, settle=0.2, poll=0.05)
+
+    assert run(with_api(state, go)) == [{"id": 808, "source": 77}]
+
+
+def test_bind_sends_a_callback():
+    state = {"events": []}
+
+    async def go(api):
+        await api.capture(window=0.1, settle=0.1, poll=0.05)
+
+    run(with_api(state, go))
+    assert state["bound"]["callback"] == "http://127.0.0.1/"
+
+
+def test_bind_uses_custom_callback_and_inbox_events():
+    state = {"events": []}
+    inbox = [{"type": 3, "reliability": 20, "channel": {"id": 9, "source": 5}}]
+
+    async def go(api):
+        return await api.capture(window=2, settle=0.1, poll=0.05,
+                                 callback="http://ha:8123/api/webhook/x", inbox=inbox)
+
+    assert run(with_api(state, go)) == [{"id": 9, "source": 5}]
+    assert state["bound"]["callback"] == "http://ha:8123/api/webhook/x"
+    assert inbox == []
+
+
+def test_loose_fallback_and_diagnostic():
+    # unknown type label and out-of-range reliability: strict filter rejects it
+    state = {"events": [{"type": 99, "reliability": 200, "channel": {"id": 808, "source": 7}}]}
+    holder = {}
+
+    async def go(api):
+        result = await api.capture(window=0.4, settle=0.1, poll=0.05)
+        holder["api"] = api
+        return result
+
+    assert run(with_api(state, go)) == [{"id": 808, "source": 7}]
+    assert holder["api"].used_fallback is True
+    assert "event(s)" in holder["api"].diagnostic and "99" in holder["api"].diagnostic
+
+
+def test_diagnostic_without_events_and_without_secrets():
+    state = {"events": []}
+    holder = {}
+
+    async def go(api):
+        assert await api.capture(window=0.2, settle=0.1, poll=0.05) == []
+        holder["d"] = api.diagnostic
+
+    run(with_api(state, go))
+    assert holder["d"] == "no event received from the service"
+    d = enroll.summarize_events([{"type": 3, "reliability": 20, "channel": {"id": 808, "source": 987654}}])
+    assert "987654" not in d and "808" in d
+
+
+def test_errors_are_ignored_by_loose_fallback():
+    assert enroll.pick_loose_candidates([{"type": 0x105, "channel": {"id": 1, "source": 2}}]) == []
