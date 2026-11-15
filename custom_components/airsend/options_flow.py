@@ -30,8 +30,11 @@ from .enroll import (
     PROG_NOTE,
     AirSendApi,
     AirSendApiError,
+    candidate_key,
     describe_candidate,
+    group_candidates,
     normalize_protocol,
+    subtract_baseline,
 )
 from .vault import InvalidPin, PinLocked, WeakPin
 from .vault_store import get_vault_manager
@@ -42,6 +45,8 @@ _PIN = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 _SECRET = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 DEVICE_TYPES = {"4098": "cover", "4097": "switch", "4096": "button", "4100": "light"}
 CAPTURE_WINDOW_SECONDS = 60
+BASELINE_SECONDS = 10
+MAX_GROUPS = 8
 
 
 def _select(options: list[tuple[str, str]], translation_key: str | None = None):
@@ -67,7 +72,10 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         self._pending_device: dict | None = None
         self._capture_error: str | None = None
         self._capture_api: AirSendApi | None = None
-        self._candidates: list[dict] = []
+        self._candidates: list = []  # groups: [[(channel, hits), ...], ...]
+        self._variants: list = []  # [(channel, hits)] of the chosen group
+        self._baseline: set = set()
+        self._baseline_task: asyncio.Task | None = None
         self._candidate_labels: dict[str, str] = {}
         self._diagnostic = ""
         self._webhook_id: str | None = None
@@ -101,8 +109,9 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
     @callback
     def async_remove(self) -> None:
         """Flow closed: stop listening and drop the temporary webhook."""
-        if self._task is not None and not self._task.done():
-            self._task.cancel()
+        for task in (self._task, self._baseline_task):
+            if task is not None and not task.done():
+                task.cancel()
         self._unregister_webhook()
 
     def _unregister_webhook(self) -> None:
@@ -176,7 +185,8 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
             except Exception as err:  # noqa: BLE001
                 errors["base"] = self._unexpected(err)
             else:
-                return await self.async_step_capture_ready()
+                self._baseline = set()
+                return await self.async_step_capture_prepare()
         return self.async_show_form(
             step_id="pair",
             description_placeholders={"diagnostic": self._diagnostic},
@@ -192,6 +202,42 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         )
 
     # -- mode A: capture an existing remote -----------------------------
+    async def async_step_capture_prepare(self, user_input=None):
+        """Offer a quiet listening first, to ignore ambient transmitters."""
+        return self.async_show_menu(
+            step_id="capture_prepare",
+            menu_options=["baseline", "skip_baseline"],
+            description_placeholders={"seconds": str(BASELINE_SECONDS)},
+        )
+
+    async def async_step_skip_baseline(self, user_input=None):
+        self._baseline = set()
+        return await self.async_step_capture_ready()
+
+    async def async_step_baseline(self, user_input=None):
+        if self._baseline_task is None:
+            self._baseline_task = self.hass.async_create_task(
+                self._api().capture(window=BASELINE_SECONDS, settle=10**9)
+            )
+        if not self._baseline_task.done():
+            return self.async_show_progress(
+                step_id="baseline",
+                progress_action="baseline",
+                progress_task=self._baseline_task,
+            )
+        return self.async_show_progress_done(next_step_id="baseline_done")
+
+    async def async_step_baseline_done(self, user_input=None):
+        task, self._baseline_task = self._baseline_task, None
+        if task is not None:
+            try:
+                self._baseline = {candidate_key(c) for c in task.result()}
+            except Exception:  # noqa: BLE001 - the baseline is only an optimisation
+                _LOGGER.debug("Baseline listening failed", exc_info=True)
+                self._baseline = set()
+            await self._async_rebind_box()
+        return await self.async_step_capture_ready()
+
     async def async_step_capture_ready_model(self, user_input=None):
         return await self.async_step_capture_ready(user_input)
 
@@ -265,6 +311,8 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         """Idempotent re-entry: the frontend may call capture_done more than once."""
         if self._candidates:
             return await self.async_step_capture_choose()
+        if self._variants:
+            return await self.async_step_capture_variant()
         if self._model is not None:
             return await self.async_step_virtual_prog()
         if self._channel is not None:
@@ -291,29 +339,47 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
                 _LOGGER.warning(
                     "AirSend capture used the relaxed frame filter (%s)", self._diagnostic
                 )
-            if len(candidates) > 1:
-                return await self._async_prepare_choice(candidates)
-            return await self._async_use_candidate(candidates[0])
+            hits = list(self._capture_api.candidate_hits) if self._capture_api else []
+            candidates, hits, _filtered = subtract_baseline(candidates, hits, self._baseline)
+            return await self._async_after_candidates(candidates, hits)
         except Exception as err:  # noqa: BLE001 - never a silent HTTP 500
             self._capture_error = self._unexpected(err)
             return await self.async_step_capture_ready()
 
-    async def _async_prepare_choice(self, candidates: list[dict]):
-        """Several remotes were heard: let the user pick (best guess first)."""
-        names: dict = {}
+    async def _async_after_candidates(self, candidates: list[dict], hits: list[int]):
+        """Group decoder variants of the same transmitter, then pick or ask."""
+        groups = group_candidates(candidates, hits)
+        if len(groups) == 1:
+            return await self._async_choose_variant(groups[0])
+        return await self._async_prepare_choice(groups[:MAX_GROUPS])
+
+    async def _async_protocols(self) -> dict:
+        """Protocol id -> normalized info (best effort)."""
         try:
-            for info in await self._api().list_channels():
-                proto = normalize_protocol(info)
-                names[proto["id"]] = proto["name"]
+            return {
+                p["id"]: p
+                for p in (normalize_protocol(i) for i in await self._api().list_channels())
+            }
         except AirSendApiError:
-            pass
-        hits = self._capture_api.candidate_hits if self._capture_api else []
-        self._candidates = candidates
+            return {}
+
+    @staticmethod
+    def _label(channel: dict, hits: int, protocols: dict, variants: int = 1) -> str:
+        proto = protocols.get(channel.get("id")) or {}
+        label = describe_candidate(channel, hits, proto.get("name"))
+        if proto.get("rolling"):
+            label += " [rolling]"
+        if variants > 1:
+            label += f" (+{variants - 1})"
+        return label
+
+    async def _async_prepare_choice(self, groups: list):
+        """Several transmitters were heard: let the user pick (best guess first)."""
+        protocols = await self._async_protocols()
+        self._candidates = groups
         self._candidate_labels = {
-            str(i): describe_candidate(
-                c, hits[i] if i < len(hits) else 1, names.get(c.get("id"))
-            )
-            for i, c in enumerate(candidates)
+            str(i): self._label(g[0][0], g[0][1], protocols, len(g))
+            for i, g in enumerate(groups)
         }
         return await self.async_step_capture_choose()
 
@@ -324,17 +390,45 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
                 self._candidates = []
                 return await self.async_step_capture_ready()
             try:
-                channel = self._candidates[int(choice)]
+                group = self._candidates[int(choice)]
             except (ValueError, IndexError):
                 return await self.async_step_capture_ready()
             self._candidates = []
-            return await self._async_use_candidate(channel)
+            return await self._async_choose_variant(group)
         options = list(self._candidate_labels.items()) + [("retry", "Recommencer / Retry")]
         return self.async_show_form(
             step_id="capture_choose",
             data_schema=vol.Schema(
+                {vol.Required("candidate", default="0"): _select(options)}
+            ),
+        )
+
+    async def _async_choose_variant(self, group: list):
+        """One transmitter, possibly decoded by several protocol variants."""
+        if len(group) == 1:
+            return await self._async_use_candidate(group[0][0])
+        self._variants = group
+        protocols = await self._async_protocols()
+        self._candidate_labels = {
+            str(i): self._label(c, h, protocols) for i, (c, h) in enumerate(group)
+        }
+        return await self.async_step_capture_variant()
+
+    async def async_step_capture_variant(self, user_input=None):
+        if user_input is not None:
+            try:
+                channel = self._variants[int(user_input["variant"])][0]
+            except (ValueError, IndexError):
+                return await self.async_step_capture_ready()
+            self._variants = []
+            return await self._async_use_candidate(channel)
+        return self.async_show_form(
+            step_id="capture_variant",
+            data_schema=vol.Schema(
                 {
-                    vol.Required("candidate", default="0"): _select(options)
+                    vol.Required("variant", default="0"): _select(
+                        list(self._candidate_labels.items())
+                    )
                 }
             ),
         )

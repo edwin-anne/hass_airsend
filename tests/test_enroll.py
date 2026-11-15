@@ -306,3 +306,17 @@ def test_describe_candidate_masks_address():
     label = enroll.describe_candidate({"id": 808, "source": 987654321}, 3, "EV1527")
     assert "987654321" not in label and "4321" in label and "x3" in label and "EV1527" in label
     assert enroll.describe_candidate({"id": 5}, 1) .startswith("5 ")
+
+
+def test_group_candidates_and_subtract_baseline():
+    chans = [{"id": 10, "source": 2391}, {"id": 11, "source": 2391}, {"id": 20, "source": 7952}]
+    groups = enroll.group_candidates(chans, [3, 3, 6])
+    assert [len(g) for g in groups] == [1, 2]  # most frames first
+    assert groups[0][0][0]["source"] == 7952
+    assert [c["id"] for c, _h in groups[1]] == [10, 11]
+    kept, hits, filtered = enroll.subtract_baseline(chans, [3, 3, 6], {enroll.candidate_key(chans[2])})
+    assert filtered and [c["id"] for c in kept] == [10, 11] and hits == [3, 3]
+    # nothing new left -> full list, not filtered
+    same, _h, filtered = enroll.subtract_baseline(chans, [3, 3, 6], {enroll.candidate_key(c) for c in chans})
+    assert not filtered and same == chans
+    assert enroll.subtract_baseline(chans, [1, 1, 1], set())[2] is False

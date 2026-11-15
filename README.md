@@ -162,6 +162,9 @@ The vault fires `airsend_vault_event` on the Home Assistant event bus: `sealed`,
 ### Unexpected errors during pairing
 After updating, restart Home Assistant **and hard-reload the browser (Ctrl+F5)** so the new texts are loaded; otherwise raw keys such as `unknown` are shown. Steps no longer end in a blank "Erreur" dialog: an unexpected exception is logged (`AirSend pairing step failed`, with the full traceback) and shown as "Unexpected error (<ExceptionName: message @ file:line>)". The same text, without any address or PIN, is also posted as a persistent notification "AirSend pairing error" (bell icon in the sidebar), independent of translations. If you hit one, send the traceback from Settings > System > Logs (raw logs, search `airsend`). Run the tests with `pip install -r tests/requirements.txt && pytest tests`.
 
+### Ignoring background transmitters
+Your box hears every 433/868 MHz transmitter around. Before asking you to press a remote, the wizard offers a quiet **10 s background listening** (do not touch any remote); what it hears is then removed, so only your remote remains. If everything is filtered out (very chatty remote), the full list is shown. The same radio frame can be decoded by several variants of one protocol (e.g. `EV1527`, `EV1527_1`, `EV1527_2`): they are grouped as one transmitter (`(+2)`), and a second screen lets you pick the variant (first = most frames). Which variant a receiver understands is not documented: if it does not react, redo the pairing with another variant. Protocols reported with a counter are tagged `[rolling]`.
+
 ### Several remotes heard
 If more than one transmitter is heard (neighbours, other remotes, sensors), the wizard lists them instead of failing: the most frequent and strongest first, each line showing the protocol, only the **end** of the address and the number of frames. Pick the one you pressed, or choose "Recommencer / Retry".
 

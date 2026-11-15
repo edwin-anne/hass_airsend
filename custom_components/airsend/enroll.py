@@ -171,6 +171,51 @@ def describe_candidate(channel: dict, hits: int, protocol_name: str | None = Non
     return f"{protocol_name or channel.get('id')} \u00b7 {tail} \u00b7 x{hits}"
 
 
+def candidate_key(channel: dict) -> tuple:
+    """Identity of a heard transmitter on one protocol decoder."""
+    return tuple(channel.get(k) for k in ("id", "source", "mac", "seed"))
+
+
+def subtract_baseline(
+    channels: list[dict], hits: list[int], baseline: set
+) -> tuple[list[dict], list[int], bool]:
+    """Remove what was already heard during the quiet baseline listening.
+
+    Returns (channels, hits, filtered). Falls back to the full list (and
+    ``filtered`` False) when nothing new remains, e.g. a very chatty remote.
+    """
+    if not baseline:
+        return channels, hits, False
+    kept = [
+        (c, hits[i] if i < len(hits) else 1)
+        for i, c in enumerate(channels)
+        if candidate_key(c) not in baseline
+    ]
+    if not kept:
+        return channels, hits, False
+    return [c for c, _h in kept], [h for _c, h in kept], True
+
+
+def group_candidates(channels: list[dict], hits: list[int]) -> list[list[tuple[dict, int]]]:
+    """Group the protocol-decoder variants of one physical transmitter.
+
+    The service may decode the same radio frame with several variants of a
+    protocol (e.g. EV1527, EV1527_1, EV1527_2): same source/mac/seed. Each
+    group is [(channel, hits), ...], best variant first; groups keep the
+    incoming ranking (most frames first).
+    """
+    groups: dict[tuple, list] = {}
+    for i, channel in enumerate(channels):
+        key = (channel.get("source"), channel.get("mac"), channel.get("seed"))
+        groups.setdefault(key, []).append((channel, hits[i] if i < len(hits) else 1))
+    result = []
+    for members in groups.values():
+        members.sort(key=lambda m: (-m[1], m[0].get("id") if isinstance(m[0].get("id"), int) else 0))
+        result.append(members)
+    result.sort(key=lambda g: -g[0][1])
+    return result
+
+
 class AirSendApi:
     """Thin async client (one instance per wizard run)."""
 

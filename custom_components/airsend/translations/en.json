@@ -185,10 +185,29 @@
         "data": {
           "candidate": "Remote"
         }
+      },
+      "capture_prepare": {
+        "title": "Ignore ambient transmitters?",
+        "description": "Your box hears every 433/868 MHz transmitter around (sensors, neighbours, other remotes). Option 1 listens {seconds} seconds first WITHOUT touching any remote, then only what appears when you press is kept.",
+        "menu_options": {
+          "baseline": "Listen first (recommended)",
+          "skip_baseline": "Skip"
+        }
+      },
+      "baseline": {
+        "title": "Listening to the background"
+      },
+      "capture_variant": {
+        "title": "Protocol variant",
+        "description": "This transmitter is decoded by several protocol variants. Start with the first one (most frames). If your receiver does not react later, redo the pairing with another variant.",
+        "data": {
+          "variant": "Variant"
+        }
       }
     },
     "progress": {
-      "listen": "Listening for a remote... press ONE button now."
+      "listen": "Listening for a remote... press ONE button now.",
+      "baseline": "Listening to the background... do NOT touch any remote."
     },
     "error": {
       "cannot_connect": "Cannot reach the AirSend add-on.",

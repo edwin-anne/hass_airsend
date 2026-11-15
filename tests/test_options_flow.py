@@ -157,14 +157,14 @@ def test_several_candidates_show_choice_and_are_idempotent(of):
 
 def test_choose_candidate_then_device_and_retry(of):
     flow = make_flow(of)
-    flow._candidates = [{"id": 808, "source": 1}, {"id": 808, "source": 2}]
+    flow._candidates = [[({"id": 808, "source": 1}, 3)], [({"id": 808, "source": 2}, 1)]]
     nxt = run(flow.async_step_capture_choose({"candidate": "1"}))
     assert nxt["step_id"] == "device" and flow._channel == {"id": 808, "source": 2}
     flow2 = make_flow(of)
-    flow2._candidates = [{"id": 808, "source": 1}]
+    flow2._candidates = [[({"id": 808, "source": 1}, 3)]]
     assert run(flow2.async_step_capture_choose({"candidate": "retry"}))["step_id"] == "capture_ready"
     flow3 = make_flow(of)
-    flow3._candidates = [{"id": 808, "source": 1}]
+    flow3._candidates = [[({"id": 808, "source": 1}, 3)]]
     assert run(flow3.async_step_capture_choose({"candidate": "9"}))["step_id"] == "capture_ready"
 
 
@@ -187,7 +187,7 @@ def test_unexpected_error_gives_location_and_notification(of, monkeypatch):
     result = run(flow.async_step_capture_done())
     assert result["step_id"] == "capture_ready" and result["errors"] == {"base": "unknown"}
     diag = result["description_placeholders"]["diagnostic"]
-    assert "ValueError: kaboom" in diag and "options_flow.py:" in diag and "_async_prepare_choice" in diag
+    assert "ValueError: kaboom" in diag and "options_flow.py:" in diag and "_label" in diag
     assert of._test_notification.call_count == 1
     text = of._test_notification.call_args.args[1]
     assert "kaboom" in text and "111111" not in text and "sp://" not in text
@@ -210,3 +210,74 @@ def test_remove_device_form_builds_with_strict_selector(of):
     flow.config_entry.data = {"internal_url": "x", "devices": {"Garage": {"native": True, "secure": True}}}
     form = run(flow.async_step_remove_device())
     assert form["type"] == "form" and form["step_id"] == "remove_device"
+
+
+def _capture_flow(of, channels, hits, baseline=None):
+    flow = make_flow(of)
+    flow._baseline = baseline or set()
+    flow._task = done_task(channels)
+    flow._capture_api = MagicMock(diagnostic="", used_fallback=False, candidate_hits=hits)
+    return flow
+
+
+def test_baseline_removes_ambient_transmitters(of):
+    ambient = {"id": 1, "source": 100}
+    mine = {"id": 808, "source": 222}
+    flow = _capture_flow(of, [ambient, mine], [6, 2], baseline={(1, 100, None, None)})
+    result = run(flow.async_step_capture_done())
+    assert result["step_id"] == "device"  # only one new transmitter left: no list
+    assert flow._channel == mine
+
+
+def test_baseline_that_removes_everything_falls_back_to_full_list(of):
+    a, b = {"id": 1, "source": 100}, {"id": 2, "source": 200}
+    flow = _capture_flow(of, [a, b], [3, 2], baseline={(1, 100, None, None), (2, 200, None, None)})
+    result = run(flow.async_step_capture_done())
+    assert result["step_id"] == "capture_choose" and len(flow._candidates) == 2
+
+
+def test_variants_of_one_transmitter_are_grouped(of):
+    chans = [{"id": 10, "source": 2391}, {"id": 11, "source": 2391}, {"id": 12, "source": 2391},
+             {"id": 20, "source": 7952}]
+    flow = _capture_flow(of, chans, [3, 3, 3, 6])
+    result = run(flow.async_step_capture_done())
+    assert result["step_id"] == "capture_choose"
+    assert len(flow._candidates) == 2  # 4 decodings -> 2 physical transmitters
+    labels = list(flow._candidate_labels.values())
+    assert any("(+2)" in label for label in labels)
+    # choosing the group with 3 variants asks which variant
+    idx = next(i for i, label in labels and enumerate(labels) if "(+2)" in label)
+    nxt = run(flow.async_step_capture_choose({"candidate": str(idx)}))
+    assert nxt["step_id"] == "capture_variant"
+    assert len(flow._candidate_labels) == 3
+    done = run(flow.async_step_capture_variant({"variant": "1"}))
+    assert done["step_id"] == "device" and flow._channel["source"] == 2391
+
+
+def test_single_transmitter_with_variants_goes_straight_to_variant_step(of):
+    chans = [{"id": 10, "source": 5}, {"id": 11, "source": 5}]
+    flow = _capture_flow(of, chans, [3, 3])
+    assert run(flow.async_step_capture_done())["step_id"] == "capture_variant"
+    # re-entry must not crash
+    assert run(flow.async_step_capture_done())["step_id"] == "capture_variant"
+
+
+def test_prepare_menu_and_skip(of):
+    flow = make_flow(of)
+    menu = run(flow.async_step_capture_prepare())
+    assert menu["type"] == "menu" and menu["menu_options"] == ["baseline", "skip_baseline"]
+    flow._baseline = {(1, 1, None, None)}
+    assert run(flow.async_step_skip_baseline())["step_id"] == "capture_ready"
+    assert flow._baseline == set()
+
+
+def test_baseline_done_collects_keys_and_is_safe_twice(of):
+    flow = make_flow(of)
+    flow._baseline_task = done_task([{"id": 1, "source": 100}])
+    assert run(flow.async_step_baseline_done())["step_id"] == "capture_ready"
+    assert flow._baseline == {(1, 100, None, None)}
+    assert run(flow.async_step_baseline_done())["step_id"] == "capture_ready"
+    flow2 = make_flow(of)
+    flow2._baseline_task = done_task(exc=RuntimeError("x"))
+    assert run(flow2.async_step_baseline_done())["step_id"] == "capture_ready"
+    assert flow2._baseline == set()

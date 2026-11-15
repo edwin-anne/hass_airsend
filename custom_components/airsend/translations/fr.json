@@ -185,10 +185,29 @@
         "data": {
           "candidate": "Télécommande"
         }
+      },
+      "capture_prepare": {
+        "title": "Ignorer les émetteurs ambiants ?",
+        "description": "Votre boîtier entend tous les émetteurs 433/868 MHz alentour (capteurs, voisins, autres télécommandes). L'option 1 écoute {seconds} secondes d'abord SANS toucher aucune télécommande, puis ne garde que ce qui apparaît quand vous appuyez.",
+        "menu_options": {
+          "baseline": "Écouter d'abord (recommandé)",
+          "skip_baseline": "Passer"
+        }
+      },
+      "baseline": {
+        "title": "Écoute du bruit de fond"
+      },
+      "capture_variant": {
+        "title": "Variante de protocole",
+        "description": "Cet émetteur est décodé par plusieurs variantes du protocole. Commencez par la première (le plus de trames). Si votre récepteur ne réagit pas ensuite, refaites l'appairage avec une autre variante.",
+        "data": {
+          "variant": "Variante"
+        }
       }
     },
     "progress": {
-      "listen": "Écoute de la télécommande... appuyez sur UN bouton maintenant."
+      "listen": "Écoute de la télécommande... appuyez sur UN bouton maintenant.",
+      "baseline": "Écoute du bruit de fond... ne touchez AUCUNE télécommande."
     },
     "error": {
       "cannot_connect": "Impossible de joindre l'addon AirSend.",
