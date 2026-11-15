@@ -14,6 +14,14 @@
         "data": {
           "internal_url": "URL interne"
         }
+      },
+      "pin": {
+        "title": "Code PIN des appareils sécurisés",
+        "description": "Les appareils sécurisés ({devices}) auront leur adresse radio et leurs identifiants chiffrés. Choisissez un PIN de 6 à 8 chiffres (sans suite triviale) pour créer le coffre-fort, ou saisissez le PIN existant. Supprimez ensuite les secrets de ces appareils dans airsend.yaml.",
+        "data": {
+          "pin": "PIN",
+          "pin_confirm": "Confirmer le PIN"
+        }
       }
     },
     "error": {
@@ -21,11 +29,80 @@
       "yaml_not_found": "Fichier airsend.yaml introuvable dans /config. Créez-le d'abord.",
       "cannot_connect": "Impossible de joindre l'addon AirSend. Vérifiez que l'addon est démarré et que l'URL est correcte.",
       "timeout": "L'addon AirSend ne répond pas (timeout). Vérifiez que l'addon est démarré.",
-      "no_url": "Veuillez saisir l'URL interne de l'addon AirSend."
+      "no_url": "Veuillez saisir l'URL interne de l'addon AirSend.",
+      "pin_mismatch": "Les deux saisies du PIN sont différentes.",
+      "weak_pin": "Le PIN doit comporter 6 à 8 chiffres et ne pas être une suite triviale (123456, 000000, 121212...).",
+      "invalid_pin": "PIN incorrect.",
+      "pin_locked": "Trop d'échecs. Réessayez plus tard.",
+      "secure_no_secrets": "Un appareil sécurisé n'a ni channel/spurl/apiKey dans airsend.yaml ni secret dans le coffre."
     },
     "abort": {
       "already_configured": "AirSend est déjà configuré.",
       "reconfigure_successful": "Reconfiguration réussie."
+    }
+  },
+  "exceptions": {
+    "secure_locked": {
+      "message": "{device} est protégé : déverrouillez-le d'abord avec le PIN (entité lock ou service airsend.secure_*)."
+    },
+    "pin_required": {
+      "message": "Un PIN est requis."
+    },
+    "invalid_pin": {
+      "message": "PIN incorrect."
+    },
+    "pin_locked": {
+      "message": "Trop d'échecs. Réessayez dans environ {minutes} min."
+    },
+    "secure_not_sealed": {
+      "message": "{device} n'a aucun secret dans le coffre. Reconfigurez l'intégration."
+    },
+    "not_secure_entity": {
+      "message": "{entity} n'est pas un appareil sécurisé AirSend."
+    }
+  },
+  "services": {
+    "secure_open": {
+      "name": "Ouverture sécurisée",
+      "description": "Ouvre un volet/porte sécurisé après vérification du PIN.",
+      "fields": {
+        "entity_id": {
+          "name": "Entité",
+          "description": "Ouvrant sécurisé AirSend."
+        },
+        "pin": {
+          "name": "PIN",
+          "description": "PIN du coffre-fort."
+        }
+      }
+    },
+    "secure_close": {
+      "name": "Fermeture sécurisée",
+      "description": "Ferme un volet/porte sécurisé après vérification du PIN.",
+      "fields": {
+        "entity_id": {
+          "name": "Entité",
+          "description": "Ouvrant sécurisé AirSend."
+        },
+        "pin": {
+          "name": "PIN",
+          "description": "PIN du coffre-fort."
+        }
+      }
+    },
+    "secure_stop": {
+      "name": "Arrêt sécurisé",
+      "description": "Arrête un volet/porte sécurisé après vérification du PIN.",
+      "fields": {
+        "entity_id": {
+          "name": "Entité",
+          "description": "Ouvrant sécurisé AirSend."
+        },
+        "pin": {
+          "name": "PIN",
+          "description": "PIN du coffre-fort."
+        }
+      }
     }
   }
 }

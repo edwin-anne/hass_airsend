@@ -33,3 +33,14 @@ devices:
     channel:
         id: 13920
         source: 19259
+
+  # Secure device (PIN-protected vault, since 4.2.0).
+  # On import, channel/spurl/apiKey are encrypted and removed from Home Assistant's
+  # storage. Then delete them from this file too: it is still plain text on disk.
+  garage:
+    type: 4098
+    secure: true
+    spurl: !secret spurl
+    channel:
+      id: 12345
+      source: 1234567

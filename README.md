@@ -127,3 +127,18 @@ If you `DO NOT` provide ?gw=0&rhost=... then you may face unexpected `HTTP/500` 
 ## Preview
 
 ![Screenshot](https://raw.githubusercontent.com/devmel/hass_airsend/master/img/screenshot.png)
+
+## Secure devices (PIN vault)
+
+For sensitive equipment (garage door, gate...), add `secure: true` to the device in `airsend.yaml`.
+
+* When you add or reconfigure the integration, you choose a **6-8 digit PIN** (trivial codes such as `123456` are refused). The device's `channel`, `spurl` and `apiKey` are then **encrypted** (AES-256-GCM; key derived from the PIN with scrypt and a random "pepper" stored in `/config/.storage/airsend.pepper`) and removed from Home Assistant's storage and entity attributes.
+* **Delete these secrets from `airsend.yaml` afterwards**: that file stays in clear text on disk.
+* A secure device refuses every command until it is unlocked:
+  * the `lock.<name>_pin` entity: unlock with the PIN (Home Assistant shows a keypad). The authorization lasts **one command or 30 seconds**, then it locks again;
+  * or the services `airsend.secure_open`, `airsend.secure_close`, `airsend.secure_stop` (`entity_id` of the cover + `pin`).
+* 5 wrong PINs lock the vault for 5 min, then 15 min, then 1 h.
+* The pepper file is required to unlock the vault: losing it makes the vault unrecoverable (remove and re-add the integration). If you exclude it from your backups, a stolen backup alone cannot be brute-forced.
+* Do not expose a secure cover to voice assistants: use the lock entity.
+
+Limits: this protects access *from Home Assistant* and the stored configuration. It does not protect against someone cloning your physical remote, nor against an attacker with live root access to the Home Assistant host while a command is being sent. Native pairing inside Home Assistant is planned for a later release.

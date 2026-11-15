@@ -6,8 +6,17 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_INTERNAL_URL
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from . import DOMAIN, load_airsend_yaml, get_internal_url
+from .vault import InvalidPin, PinLocked, WeakPin, split_secure_devices
+from .vault_store import get_vault_manager
+
+_PIN_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
 _LOGGER = logging.getLogger(DOMAIN)
 
@@ -39,6 +48,76 @@ class AirSendConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    _pending: dict | None = None
+
+    async def _async_prepare_devices(self, devices: dict, url: str, entry=None):
+        """Strip secrets of secure devices; ask for the PIN when they must be sealed.
+
+        Returns (result, error). ``result`` is a flow result when the PIN step is
+        needed, ``None`` when the entry can be written straight away.
+        """
+        public, secrets = split_secure_devices(devices)
+        vault = get_vault_manager(self.hass)
+        await vault.async_load()
+        secure_names = [n for n, o in devices.items() if isinstance(o, dict) and o.get("secure")]
+        missing = [n for n in secure_names if n not in secrets and not vault.has_device(n)]
+        if missing:
+            return None, "secure_no_secrets", public
+        self._pending = {"url": url, "devices": public, "secrets": secrets, "entry": entry}
+        if secrets:
+            return await self.async_step_pin(), None, public
+        return None, None, public
+
+    async def async_step_pin(self, user_input=None):
+        """Create the vault (or unlock it) and seal the secrets of secure devices."""
+        errors = {}
+        vault = get_vault_manager(self.hass)
+        await vault.async_load()
+        creating = not vault.has_vault
+        pending = self._pending
+
+        if user_input is not None:
+            pin = user_input["pin"]
+            try:
+                if creating:
+                    if pin != user_input.get("pin_confirm"):
+                        errors["base"] = "pin_mismatch"
+                    else:
+                        await vault.async_create(pin)
+                if not errors:
+                    await vault.async_seal(pin, pending["secrets"])
+                    return await self._async_finish()
+            except WeakPin:
+                errors["base"] = "weak_pin"
+            except InvalidPin:
+                errors["base"] = "invalid_pin"
+            except PinLocked as err:
+                errors["base"] = "pin_locked"
+                _LOGGER.warning("AirSend vault locked for %ss", err.retry_after)
+
+        schema = {vol.Required("pin"): _PIN_SELECTOR}
+        if creating:
+            schema[vol.Required("pin_confirm")] = _PIN_SELECTOR
+        return self.async_show_form(
+            step_id="pin",
+            data_schema=vol.Schema(schema),
+            description_placeholders={"devices": ", ".join(pending["secrets"])},
+            errors=errors,
+        )
+
+    async def _async_finish(self):
+        """Write the config entry (secrets of secure devices already sealed)."""
+        pending = self._pending
+        data = {CONF_INTERNAL_URL: pending["url"], "devices": pending["devices"]}
+        entry = pending["entry"]
+        if entry is None:
+            await self.async_set_unique_id(DOMAIN)
+            self._abort_if_unique_id_configured()
+            return self.async_create_entry(title="AirSend", data=data)
+        self.hass.config_entries.async_update_entry(entry, data=data)
+        await self.hass.config_entries.async_reload(entry.entry_id)
+        return self.async_abort(reason="reconfigure_successful")
+
     async def async_step_user(self, user_input=None):
         """First step: detect URL, test connection, load devices."""
         errors = {}
@@ -64,15 +143,15 @@ class AirSendConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if not devices:
                     errors["base"] = "no_devices"
                 else:
-                    await self.async_set_unique_id(DOMAIN)
-                    self._abort_if_unique_id_configured()
-                    return self.async_create_entry(
-                        title="AirSend",
-                        data={
-                            CONF_INTERNAL_URL: internal_url,
-                            "devices": devices,
-                        },
+                    result, error, public = await self._async_prepare_devices(
+                        devices, internal_url
                     )
+                    if error:
+                        errors["base"] = error
+                    elif result is not None:
+                        return result
+                    else:
+                        return await self._async_finish()
 
         yaml_path = self.hass.config.path("airsend.yaml")
         yaml_exists = await self.hass.async_add_executor_job(os.path.exists, yaml_path)
@@ -114,15 +193,15 @@ class AirSendConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if not devices:
                     errors["base"] = "no_devices"
                 else:
-                    self.hass.config_entries.async_update_entry(
-                        entry,
-                        data={
-                            CONF_INTERNAL_URL: internal_url,
-                            "devices": devices,
-                        },
+                    result, error, public = await self._async_prepare_devices(
+                        devices, internal_url, entry
                     )
-                    await self.hass.config_entries.async_reload(entry.entry_id)
-                    return self.async_abort(reason="reconfigure_successful")
+                    if error:
+                        errors["base"] = error
+                    elif result is not None:
+                        return result
+                    else:
+                        return await self._async_finish()
 
         return self.async_show_form(
             step_id="reconfigure",

@@ -4,6 +4,8 @@ import json
 import hashlib
 import re
 import aiohttp
+from typing import Callable
+from homeassistant.exceptions import ServiceValidationError
 from . import DOMAIN
 
 _LOGGER = logging.getLogger(DOMAIN)
@@ -30,6 +32,28 @@ class TransferResult(Enum):
     NETWORK_ERROR = "network_error" # Addon unreachable (timeout, connection refused)
 
 
+class SecureLocked(ServiceValidationError):
+    """A secure device was used without a valid PIN authorization."""
+
+    def __init__(self, device_name: str) -> None:
+        super().__init__(
+            translation_domain=DOMAIN,
+            translation_key="secure_locked",
+            translation_placeholders={"device": device_name},
+        )
+
+
+# Returns the decrypted secrets (single use) for a secure device name, or None.
+# Registered by the integration at setup (see __init__.async_setup_entry).
+_secrets_provider: Callable[[str], dict | None] | None = None
+
+
+def set_secrets_provider(provider: Callable[[str], dict | None] | None) -> None:
+    """Register (or clear) the callable that releases secrets after a PIN."""
+    global _secrets_provider
+    _secrets_provider = provider
+
+
 class Device:
     """Representation of a Device."""
 
@@ -51,6 +75,7 @@ class Device:
         self._note = None
         self._bind = None
         self._refresh = 5 * 60
+        self._secure = bool(options.get("secure", False))
         try:
             self._uid = options["id"]
         except KeyError:
@@ -133,9 +158,17 @@ class Device:
         return self._name
 
     @property
+    def is_secure(self) -> bool:
+        """Secrets of this device live in the PIN-protected vault."""
+        return self._secure
+
+    @property
     def unique_channel_name(self) -> str:
         if self._uid:
             return str(self._uid)
+        if self._secure:
+            # Never derive the id from (sealed) radio secrets.
+            return "secure_" + hashlib.sha256(self._name.encode("utf-8")).hexdigest()[:10]
         if self._channel:
             result = str(self._channel['id'])
             if result:
@@ -171,6 +204,8 @@ class Device:
 
     @property
     def extra_state_attributes(self):
+        if self._secure:
+            return {"secure": True, "secure_device": self._name}
         if self._channel:
             return {"channel": self._channel}
         return None
@@ -255,7 +290,17 @@ class Device:
         if self._wait:
             wait = 'true'
 
-        if self._serviceurl and self._spurl and entity_id is not None:
+        channel, spurl, apikey = self._channel, self._spurl, self._apikey
+        if self._secure:
+            # Secrets only exist in memory for this single call.
+            secrets = _secrets_provider(self._name) if _secrets_provider else None
+            if not secrets:
+                raise SecureLocked(self._name)
+            channel = secrets.get("channel", {})
+            spurl = secrets.get("spurl")
+            apikey = secrets.get("apiKey")
+
+        if self._serviceurl and spurl and entity_id is not None:
             uid = hashlib.sha256(entity_id.encode('utf-8')).hexdigest()[:12]
             jnote = json.dumps(note)
             if (
@@ -269,13 +314,13 @@ class Device:
 
             payload = (
                 '{"wait": ' + wait + ', "channel":'
-                + json.dumps(self._channel)
+                + json.dumps(channel)
                 + ', "thingnotes":{"uid":"0x' + uid + '", "notes":['
                 + jnote
                 + "]}}"
             )
             headers = {
-                "Authorization": "Bearer " + self._spurl,
+                "Authorization": "Bearer " + spurl,
                 "content-type": "application/json",
                 "User-Agent": "hass_airsend",
             }
@@ -304,7 +349,7 @@ class Device:
                 return TransferResult.NETWORK_ERROR
 
         # Fallback to cloud API if local failed
-        if status_code != 200 and self._apikey:
+        if status_code != 200 and apikey:
             action = "command"
             value = 6
             if all(k in note for k in ("method", "type", "value")):
@@ -321,7 +366,7 @@ class Device:
                 + str(self._uid) + "/" + action + "/" + str(value) + "/"
             )
             headers = {
-                "Authorization": "Bearer " + self._apikey,
+                "Authorization": "Bearer " + apikey,
                 "content-type": "application/json",
                 "User-Agent": "hass_airsend",
             }
@@ -353,4 +398,4 @@ class Device:
             _LOGGER.warning("Transfer '%s' : server error (500), command may have been sent", self.name)
             return TransferResult.SERVER_ERROR
         _LOGGER.warning("Transfer '%s' : unexpected status %s", self.name, status_code)
-        return TransferResult.SERVER_ERROR
+        return TransferResult.SERVER_ERROR

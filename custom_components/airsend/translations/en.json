@@ -14,6 +14,14 @@
         "data": {
           "internal_url": "Internal URL"
         }
+      },
+      "pin": {
+        "title": "Secure devices PIN",
+        "description": "Secure devices ({devices}) will have their radio address and credentials encrypted. Choose a 6-8 digit PIN (no trivial sequences) when creating the vault, or enter the existing PIN. Remove the secrets of these devices from airsend.yaml afterwards.",
+        "data": {
+          "pin": "PIN",
+          "pin_confirm": "Confirm PIN"
+        }
       }
     },
     "error": {
@@ -21,11 +29,80 @@
       "yaml_not_found": "File airsend.yaml not found in /config. Please create it first.",
       "cannot_connect": "Unable to reach the AirSend addon. Check that the addon is running and the URL is correct.",
       "timeout": "The AirSend addon is not responding (timeout). Check that the addon is running.",
-      "no_url": "Please enter the internal URL of the AirSend addon."
+      "no_url": "Please enter the internal URL of the AirSend addon.",
+      "pin_mismatch": "The two PIN entries differ.",
+      "weak_pin": "PIN must be 6 to 8 digits and not a trivial sequence (123456, 000000, 121212...).",
+      "invalid_pin": "Wrong PIN.",
+      "pin_locked": "Too many failed attempts. Try again later.",
+      "secure_no_secrets": "A secure device has no channel/spurl/apiKey in airsend.yaml and none in the vault yet."
     },
     "abort": {
       "already_configured": "AirSend is already configured.",
       "reconfigure_successful": "Reconfiguration successful."
+    }
+  },
+  "exceptions": {
+    "secure_locked": {
+      "message": "{device} is protected: unlock it with the PIN first (lock entity or airsend.secure_* service)."
+    },
+    "pin_required": {
+      "message": "A PIN is required."
+    },
+    "invalid_pin": {
+      "message": "Wrong PIN."
+    },
+    "pin_locked": {
+      "message": "Too many failed attempts. Try again in about {minutes} min."
+    },
+    "secure_not_sealed": {
+      "message": "{device} has no secrets in the vault. Reconfigure the integration."
+    },
+    "not_secure_entity": {
+      "message": "{entity} is not an AirSend secure device."
+    }
+  },
+  "services": {
+    "secure_open": {
+      "name": "Secure open",
+      "description": "Open a secure cover after checking the PIN.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "AirSend secure cover."
+        },
+        "pin": {
+          "name": "PIN",
+          "description": "Vault PIN."
+        }
+      }
+    },
+    "secure_close": {
+      "name": "Secure close",
+      "description": "Close a secure cover after checking the PIN.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "AirSend secure cover."
+        },
+        "pin": {
+          "name": "PIN",
+          "description": "Vault PIN."
+        }
+      }
+    },
+    "secure_stop": {
+      "name": "Secure stop",
+      "description": "Stop a secure cover after checking the PIN.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "AirSend secure cover."
+        },
+        "pin": {
+          "name": "PIN",
+          "description": "Vault PIN."
+        }
+      }
     }
   }
 }
