@@ -170,10 +170,13 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
                 await api.events()  # authenticated call: validates the spurl
             except AirSendApiError as err:
                 errors["base"] = err.code
+            except Exception as err:  # noqa: BLE001
+                errors["base"] = self._unexpected(err)
             else:
                 return await self.async_step_capture_ready()
         return self.async_show_form(
             step_id="pair",
+            description_placeholders={"diagnostic": self._diagnostic},
             data_schema=vol.Schema(
                 {
                     vol.Required("spurl", default=self._default_spurl()): _SECRET,
@@ -220,26 +223,48 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
             )
         return self.async_show_progress_done(next_step_id="capture_done")
 
+    def _unexpected(self, err: Exception) -> str:
+        """Log an unexpected error and keep a short, secret-free diagnostic."""
+        _LOGGER.exception("AirSend pairing step failed")
+        self._diagnostic = f"{type(err).__name__}: {err}"[:200]
+        return "unknown"
+
+    async def _async_resume_after_capture(self):
+        """Idempotent re-entry: the frontend may call capture_done more than once."""
+        if self._candidates:
+            return await self.async_step_capture_choose()
+        if self._model is not None:
+            return await self.async_step_virtual_prog()
+        if self._channel is not None:
+            return await self.async_step_device()
+        return await self.async_step_capture_ready()
+
     async def async_step_capture_done(self, user_input=None):
+        if self._task is None:
+            return await self._async_resume_after_capture()
         task, self._task = self._task, None
-        self._unregister_webhook()
-        await self._async_rebind_box()
-        self._diagnostic = self._capture_api.diagnostic if self._capture_api else ""
         try:
-            candidates = task.result()
-        except AirSendApiError as err:
-            self._capture_error = err.code
+            self._unregister_webhook()
+            await self._async_rebind_box()
+            self._diagnostic = self._capture_api.diagnostic if self._capture_api else ""
+            try:
+                candidates = task.result()
+            except AirSendApiError as err:
+                self._capture_error = err.code
+                return await self.async_step_capture_ready()
+            if not candidates:
+                self._capture_error = "no_frame"
+                return await self.async_step_capture_ready()
+            if self._capture_api and self._capture_api.used_fallback:
+                _LOGGER.warning(
+                    "AirSend capture used the relaxed frame filter (%s)", self._diagnostic
+                )
+            if len(candidates) > 1:
+                return await self._async_prepare_choice(candidates)
+            return await self._async_use_candidate(candidates[0])
+        except Exception as err:  # noqa: BLE001 - never a silent HTTP 500
+            self._capture_error = self._unexpected(err)
             return await self.async_step_capture_ready()
-        if not candidates:
-            self._capture_error = "no_frame"
-            return await self.async_step_capture_ready()
-        if self._capture_api and self._capture_api.used_fallback:
-            _LOGGER.warning(
-                "AirSend capture used the relaxed frame filter (%s)", self._diagnostic
-            )
-        if len(candidates) > 1:
-            return await self._async_prepare_choice(candidates)
-        return await self._async_use_candidate(candidates[0])
 
     async def _async_prepare_choice(self, candidates: list[dict]):
         """Several remotes were heard: let the user pick (best guess first)."""
@@ -266,7 +291,10 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
             if choice == "retry":
                 self._candidates = []
                 return await self.async_step_capture_ready()
-            channel = self._candidates[int(choice)]
+            try:
+                channel = self._candidates[int(choice)]
+            except (ValueError, IndexError):
+                return await self.async_step_capture_ready()
             self._candidates = []
             return await self._async_use_candidate(channel)
         options = list(self._candidate_labels.items()) + [("retry", "Recommencer / Retry")]
@@ -304,13 +332,18 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
                 await api.send_note(self._channel, PROG_NOTE)
             except AirSendApiError as err:
                 errors["base"] = err.code
+            except Exception as err:  # noqa: BLE001
+                errors["base"] = self._unexpected(err)
             else:
                 return self.async_show_menu(
                     step_id="virtual_confirm",
                     menu_options=["device", "virtual_prog"],
                 )
         return self.async_show_form(
-            step_id="virtual_prog", data_schema=vol.Schema({}), errors=errors
+            step_id="virtual_prog",
+            data_schema=vol.Schema({}),
+            description_placeholders={"diagnostic": self._diagnostic},
+            errors=errors,
         )
 
     # -- device details + save ------------------------------------------
@@ -376,13 +409,18 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
                 errors["base"] = "invalid_pin"
             except PinLocked:
                 errors["base"] = "pin_locked"
+            except Exception as err:  # noqa: BLE001
+                errors["base"] = self._unexpected(err)
         schema = {vol.Required("pin"): _PIN}
         if creating:
             schema[vol.Required("pin_confirm")] = _PIN
         return self.async_show_form(
             step_id="seal",
             data_schema=vol.Schema(schema),
-            description_placeholders={"device": self._pending_device["name"]},
+            description_placeholders={
+                "device": self._pending_device["name"],
+                "diagnostic": self._diagnostic,
+            },
             errors=errors,
         )
 

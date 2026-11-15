@@ -203,7 +203,8 @@
       "weak_pin": "Le PIN doit comporter 6 à 8 chiffres et ne pas être une suite triviale.",
       "invalid_pin": "PIN incorrect.",
       "pin_locked": "Trop d'échecs. Réessayez plus tard.",
-      "build_same_channel": "Le service a renvoyé le canal modèle au lieu d'un nouveau canal."
+      "build_same_channel": "Le service a renvoyé le canal modèle au lieu d'un nouveau canal.",
+      "unknown": "Erreur inattendue ({diagnostic}). Consultez les journaux Home Assistant (« airsend »)."
     },
     "abort": {
       "nothing_to_remove": "Aucun appareil appairé nativement ou sécurisé à supprimer.",

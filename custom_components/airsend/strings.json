@@ -203,7 +203,8 @@
       "weak_pin": "PIN must be 6 to 8 digits and not a trivial sequence.",
       "invalid_pin": "Wrong PIN.",
       "pin_locked": "Too many failed attempts. Try again later.",
-      "build_same_channel": "The service returned the model channel instead of a new one."
+      "build_same_channel": "The service returned the model channel instead of a new one.",
+      "unknown": "Unexpected error ({diagnostic}). Check the Home Assistant logs for 'airsend'."
     },
     "abort": {
       "nothing_to_remove": "No natively paired or secure device to remove.",
