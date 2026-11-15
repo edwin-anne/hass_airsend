@@ -1,4 +1,5 @@
 """AirSend device."""
+import asyncio
 import logging
 import json
 import hashlib
@@ -17,6 +18,25 @@ RTYPE_LABELS = {
     4099: "AirSend Cover (position)",
     4100: "AirSend Light",
 }
+
+# A AirSend box has a single RF transmitter: it can emit only one frame at a
+# time. Commands sent in parallel (e.g. closing 10 shutters at once) make the
+# box answer 500 ("no RF confirmation") and some frames are lost. All local
+# commands going through the same box are therefore serialized with a lock.
+TRANSFER_GAP = 0.3          # seconds the transmitter is left free after a command
+TRANSFER_RETRIES = 2        # extra attempts when the box answers 500
+TRANSFER_RETRY_DELAY = 0.7  # seconds before retrying after a 500
+
+_BOX_LOCKS: dict = {}
+
+
+def _box_lock(serviceurl: str, spurl: str) -> asyncio.Lock:
+    """Return the lock shared by every device using the same box."""
+    key = (serviceurl, spurl)
+    lock = _BOX_LOCKS.get(key)
+    if lock is None:
+        lock = _BOX_LOCKS[key] = asyncio.Lock()
+    return lock
 
 
 from enum import Enum
@@ -247,6 +267,26 @@ class Device:
             _LOGGER.debug("Bind error '%s': %s", self._name, err)
             return False
 
+    async def _post_transfer(self, payload, headers):
+        """POST one transfer to the add-on. Return (ret, status_code)."""
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self._serviceurl + "airsend/transfer",
+                headers=headers,
+                data=payload,
+                timeout=aiohttp.ClientTimeout(total=6),
+            ) as response:
+                if self._wait:
+                    status_code = 500
+                    try:
+                        jdata = await response.json(content_type=None)
+                        if jdata.get("type", 0x100) < 0x100:
+                            status_code = response.status
+                    except Exception:
+                        pass
+                    return True, status_code
+                return None, response.status
+
     async def async_transfer(self, note, entity_id=None) -> "TransferResult":
         """Send a command (async)."""
         status_code = 404
@@ -280,26 +320,19 @@ class Device:
                 "User-Agent": "hass_airsend",
             }
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self._serviceurl + "airsend/transfer",
-                        headers=headers,
-                        data=payload,
-                        timeout=aiohttp.ClientTimeout(total=6),
-                    ) as response:
-                        if self._wait:
-                            ret = True
-                            status_code = 500
-                            try:
-                                jdata = await response.json(content_type=None)
-                                if jdata.get("type", 0x100) < 0x100:
-                                    status_code = response.status
-                            except Exception:
-                                pass
-                        else:
-                            ret = None
-                            status_code = response.status
-            except aiohttp.ClientError as err:
+                async with _box_lock(self._serviceurl, self._spurl):
+                    for attempt in range(TRANSFER_RETRIES + 1):
+                        ret, status_code = await self._post_transfer(payload, headers)
+                        # Leave the RF transmitter free before the next command
+                        await asyncio.sleep(TRANSFER_GAP)
+                        if status_code != 500 or attempt == TRANSFER_RETRIES:
+                            break
+                        _LOGGER.debug(
+                            "Transfer '%s' : 500 from box, retry %d/%d",
+                            self._name, attempt + 1, TRANSFER_RETRIES,
+                        )
+                        await asyncio.sleep(TRANSFER_RETRY_DELAY)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 _LOGGER.debug("Transfer local error '%s': %s", self._name, err)
                 return TransferResult.NETWORK_ERROR
 
@@ -347,10 +380,10 @@ class Device:
             _LOGGER.error("Transfer '%s' : invalid input (405) — check channel configuration", self.name)
             return TransferResult.SERVER_ERROR
         if status_code == 500:
-            if self._wait:
-                _LOGGER.warning("Transfer '%s' : no RF confirmation (500), command may have been sent", self.name)
-                return TransferResult.SENT
-            _LOGGER.warning("Transfer '%s' : server error (500), command may have been sent", self.name)
+            _LOGGER.warning(
+                "Transfer '%s' : no RF confirmation (500) after %d attempts, command not confirmed",
+                self.name, TRANSFER_RETRIES + 1,
+            )
             return TransferResult.SERVER_ERROR
         _LOGGER.warning("Transfer '%s' : unexpected status %s", self.name, status_code)
-        return TransferResult.SERVER_ERROR
+        return TransferResult.SERVER_ERROR
