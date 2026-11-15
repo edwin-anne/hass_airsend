@@ -1,11 +1,11 @@
 """Config flow for AirSend integration."""
-import os
 import logging
 import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_INTERNAL_URL
+from homeassistant.core import callback
 from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
@@ -49,6 +49,14 @@ class AirSendConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     _pending: dict | None = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Options flow: native pairing, PIN change, device removal."""
+        from .options_flow import AirSendOptionsFlow
+
+        return AirSendOptionsFlow()
 
     async def _async_prepare_devices(self, devices: dict, url: str, entry=None):
         """Strip secrets of secure devices; ask for the PIN when they must be sealed.
@@ -135,28 +143,24 @@ class AirSendConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = connection_error
             else:
                 # Chargement du yaml
+                # airsend.yaml is optional: devices can be paired natively later
+                # (Configure > Pair a device).
                 yaml_data = await self.hass.async_add_executor_job(
                     load_airsend_yaml, self.hass
                 )
                 devices = yaml_data.get("devices", {})
 
-                if not devices:
-                    errors["base"] = "no_devices"
+                result, error, public = await self._async_prepare_devices(
+                    devices, internal_url
+                )
+                if error:
+                    errors["base"] = error
+                elif result is not None:
+                    return result
                 else:
-                    result, error, public = await self._async_prepare_devices(
-                        devices, internal_url
-                    )
-                    if error:
-                        errors["base"] = error
-                    elif result is not None:
-                        return result
-                    else:
-                        return await self._async_finish()
+                    return await self._async_finish()
 
         yaml_path = self.hass.config.path("airsend.yaml")
-        yaml_exists = await self.hass.async_add_executor_job(os.path.exists, yaml_path)
-        if not yaml_exists and not errors:
-            errors["base"] = "yaml_not_found"
 
         return self.async_show_form(
             step_id="user",
@@ -188,20 +192,23 @@ class AirSendConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 yaml_data = await self.hass.async_add_executor_job(
                     load_airsend_yaml, self.hass
                 )
-                devices = yaml_data.get("devices", {})
+                # Natively paired devices are kept; YAML devices win on name clash.
+                devices = {
+                    n: o
+                    for n, o in entry.data.get("devices", {}).items()
+                    if isinstance(o, dict) and o.get("native")
+                }
+                devices.update(yaml_data.get("devices", {}))
 
-                if not devices:
-                    errors["base"] = "no_devices"
+                result, error, public = await self._async_prepare_devices(
+                    devices, internal_url, entry
+                )
+                if error:
+                    errors["base"] = error
+                elif result is not None:
+                    return result
                 else:
-                    result, error, public = await self._async_prepare_devices(
-                        devices, internal_url, entry
-                    )
-                    if error:
-                        errors["base"] = error
-                    elif result is not None:
-                        return result
-                    else:
-                        return await self._async_finish()
+                    return await self._async_finish()
 
         return self.async_show_form(
             step_id="reconfigure",

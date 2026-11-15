@@ -1,0 +1,158 @@
+"""Tests for the AirSendWebService client, against a fake local server."""
+import asyncio
+import importlib.util
+import pathlib
+
+import aiohttp
+import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
+
+_PATH = pathlib.Path(__file__).parents[1] / "custom_components" / "airsend" / "enroll.py"
+_spec = importlib.util.spec_from_file_location("airsend_enroll", _PATH)
+enroll = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(enroll)
+
+SPURL = "sp://pw@[fe80::1]?gw=0&rhost=10.0.0.2"
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def make_app(state):
+    app = web.Application()
+
+    def need_auth(request):
+        if request.headers.get("Authorization") != "Bearer " + SPURL:
+            raise web.HTTPUnauthorized()
+
+    async def status(_):
+        return web.json_response({"version": 0.22})
+
+    async def channels(_):
+        return web.json_response([{"id": 808, "name": "EV1527", "band": 433, "counter": 0, "clone": 3}])
+
+    async def build(request):
+        state["build_body"] = await request.json()
+        if state.get("build_bad"):
+            return web.json_response({"nope": 1})
+        return web.json_response({"id": 808, "source": 5551234, "counter": 1, "mac": 9, "seed": 4, "x": "dropped"})
+
+    async def bind(request):
+        need_auth(request)
+        state["bound"] = await request.json()
+        return web.json_response({})
+
+    async def unbind(request):
+        need_auth(request)
+        state["unbound"] = True
+        return web.Response(text="")
+
+    async def events(request):
+        need_auth(request)
+        state["polls"] = state.get("polls", 0) + 1
+        return web.json_response(state.get("events", []))
+
+    async def transfer(request):
+        need_auth(request)
+        state["transfer"] = await request.json()
+        return web.json_response({"type": 1})
+
+    app.router.add_get("/service/status", status)
+    app.router.add_get("/channels", channels)
+    app.router.add_post("/channels/build", build)
+    app.router.add_post("/airsend/bind", bind)
+    app.router.add_get("/airsend/unbind", unbind)
+    app.router.add_get("/airsend/events", events)
+    app.router.add_post("/airsend/transfer", transfer)
+    return app
+
+
+async def with_api(state, fn, spurl=SPURL):
+    async with TestServer(make_app(state)) as server:
+        async with aiohttp.ClientSession() as session:
+            api = enroll.AirSendApi(session, str(server.make_url("/")), spurl)
+            return await fn(api)
+
+
+def test_list_and_build():
+    state = {}
+
+    async def go(api):
+        chans = await api.list_channels()
+        built = await api.build_channel(808)
+        return chans, built
+
+    chans, built = run(with_api(state, go))
+    assert chans[0]["name"] == "EV1527"
+    assert state["build_body"] == {"id": 808}
+    assert built == {"id": 808, "source": 5551234, "counter": 1, "mac": 9, "seed": 4}
+
+
+def test_build_bad_response():
+    async def go(api):
+        with pytest.raises(enroll.AirSendApiError):
+            await api.build_channel(808)
+
+    run(with_api({"build_bad": True}, go))
+
+
+def test_wrong_spurl_is_401():
+    async def go(api):
+        with pytest.raises(enroll.AirSendApiError) as exc:
+            await api.events()
+        assert exc.value.code == "invalid_spurl"
+
+    run(with_api({}, go, spurl="sp://wrong"))
+
+
+def test_capture_stops_after_first_frame_and_unbinds():
+    state = {"events": [
+        {"type": 3, "reliability": 20, "channel": {"id": 808, "source": 77, "mac": 1}},
+        {"type": 3, "reliability": 20, "channel": {"id": 808, "source": 77, "mac": 1}},  # duplicate
+        {"type": 0, "channel": {"id": 1, "source": 1}},  # not a GOT
+    ]}
+
+    async def go(api):
+        return await api.capture(window=5, settle=0.2, poll=0.05)
+
+    result = run(with_api(state, go))
+    assert result == [{"id": 808, "source": 77, "mac": 1}]
+    assert state["bound"]["duration"] == 0
+    assert state["unbound"] is True
+
+
+def test_capture_timeout_returns_empty_and_unbinds():
+    state = {"events": []}
+
+    async def go(api):
+        return await api.capture(window=0.3, settle=0.1, poll=0.05)
+
+    assert run(with_api(state, go)) == []
+    assert state["unbound"] is True
+
+
+def test_pick_candidates_filters():
+    ev = [
+        {"type": "GOT", "reliability": 0x6, "channel": {"id": 1, "source": 1}},   # boundary excluded
+        {"type": "GOT", "reliability": 0x47, "channel": {"id": 1, "source": 2}},  # boundary excluded
+        {"type": "GOT", "channel": {"id": 1, "source": 3, "reliability": 30}},    # reliability inside channel
+        {"type": "GOT", "channel": {"id": 1, "source": 4}},                      # no reliability info: kept
+        {"type": "GOT", "channel": {"source": 5}},                               # no id
+        "garbage",
+    ]
+    assert [c["source"] for c in enroll.pick_candidates(ev)] == [3, 4]
+
+
+def test_send_prog_payload():
+    state = {}
+
+    async def go(api):
+        await api.send_note({"id": 808, "source": 5}, enroll.PROG_NOTE)
+
+    run(with_api(state, go))
+    assert state["transfer"] == {
+        "wait": True, "channel": {"id": 808, "source": 5},
+        "thingnotes": {"notes": [{"method": 1, "type": 0, "value": "PROG"}]},
+    }

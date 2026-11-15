@@ -29,6 +29,8 @@ PEPPER_FILE = "airsend.pepper"
 # memory for at most this long and for a single command.
 AUTH_WINDOW_SECONDS = 30
 SIGNAL_SECURE_CHANGED = "airsend_secure_changed"
+EVENT_VAULT = "airsend_vault_event"  # audit trail on the HA event bus
+NOTIFY_AFTER_FAILURES = 3
 
 
 class VaultManager:
@@ -95,23 +97,60 @@ class VaultManager:
         except FileNotFoundError:
             pass
 
+    # -- audit -----------------------------------------------------------
+    @callback
+    def audit(self, kind: str, device: str | None = None) -> None:
+        """Fire an ``airsend_vault_event`` (never contains PIN or secrets)."""
+        self.hass.bus.async_fire(EVENT_VAULT, {"type": kind, "device": device})
+
+    def _notify(self, title: str, message: str, key: str) -> None:
+        from homeassistant.components import persistent_notification
+
+        persistent_notification.async_create(
+            self.hass, message, title=title, notification_id=f"{STORAGE_KEY}_{key}"
+        )
+
     # -- PIN-protected operations ---------------------------------------
-    async def _async_unlock(self, pin: str) -> bytes:
+    async def _async_unlock(self, pin: str, device: str | None = None) -> bytes:
         """Unlock the DEK; persists failure counters even when it raises."""
         assert self._vault is not None
         async with self._lock:
             try:
-                return await self.hass.async_add_executor_job(self._vault.unlock, pin)
+                dek = await self.hass.async_add_executor_job(self._vault.unlock, pin)
+            except InvalidPin:
+                self.audit("pin_failed", device)
+                fails = self._vault.to_dict().get("fails", 0)
+                if fails >= NOTIFY_AFTER_FAILURES:
+                    self._notify(
+                        "AirSend vault",
+                        f"{fails} wrong PIN attempts on the AirSend vault"
+                        + (f" (device: {device})." if device else "."),
+                        "failures",
+                    )
+                raise
+            except PinLocked:
+                self.audit("pin_locked", device)
+                raise
             finally:
                 if self._vault.dirty:
                     await self._async_save()
+            return dek
 
     async def async_seal(self, pin: str, secrets_by_device: dict) -> None:
         """Seal secrets for several devices (PIN required)."""
         dek = await self._async_unlock(pin)
         for device_id, secrets in secrets_by_device.items():
             self._vault.seal_device(dek, device_id, secrets)
+            self.audit("sealed", device_id)
         await self._async_save()
+
+    async def async_remove_device(self, device_id: str) -> None:
+        """Forget a device's sealed secrets (no PIN needed: it only destroys data)."""
+        if self._vault is not None and self._vault.has_device(device_id):
+            self.revoke(device_id)
+            self._vault.remove_device(device_id)
+            await self._async_save()
+            self.audit("removed", device_id)
 
     async def async_change_pin(self, old_pin: str, new_pin: str) -> None:
         assert self._vault is not None
@@ -120,6 +159,7 @@ class VaultManager:
                 await self.hass.async_add_executor_job(
                     self._vault.change_pin, old_pin, new_pin
                 )
+                self.audit("pin_changed")
             finally:
                 if self._vault.dirty:
                     await self._async_save()
@@ -128,9 +168,10 @@ class VaultManager:
         """Validate the PIN and open a one-shot window for ``device_id``."""
         if self._vault is None:
             raise UnknownDevice(device_id)
-        dek = await self._async_unlock(pin)
+        dek = await self._async_unlock(pin, device_id)
         secrets = self._vault.open_device(dek, device_id)
         self.revoke(device_id)
+        self.audit("unlocked", device_id)
 
         @callback
         def _expire(_now) -> None:
@@ -155,6 +196,7 @@ class VaultManager:
         secrets, cancel = entry
         cancel()
         async_dispatcher_send(self.hass, SIGNAL_SECURE_CHANGED, device_id)
+        self.audit("command_authorized", device_id)
         return secrets
 
     @callback

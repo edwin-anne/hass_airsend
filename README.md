@@ -141,4 +141,28 @@ For sensitive equipment (garage door, gate...), add `secure: true` to the device
 * The pepper file is required to unlock the vault: losing it makes the vault unrecoverable (remove and re-add the integration). If you exclude it from your backups, a stolen backup alone cannot be brute-forced.
 * Do not expose a secure cover to voice assistants: use the lock entity.
 
-Limits: this protects access *from Home Assistant* and the stored configuration. It does not protect against someone cloning your physical remote, nor against an attacker with live root access to the Home Assistant host while a command is being sent. Native pairing inside Home Assistant is planned for a later release.
+Limits: this protects access *from Home Assistant* and the stored configuration. It does not protect against someone cloning your physical remote, nor against an attacker with live root access to the Home Assistant host while a command is being sent.
+
+## Native pairing in Home Assistant (no airsend.cloud, no YAML)
+
+`airsend.yaml` is now optional. Open **Settings > Devices & services > AirSend > Configure**:
+
+* **Pair a new device** - enter the box locator (`spurl`), then choose:
+  * **Capture an existing remote** (fixed-code protocols): the integration listens for 60 s (`bind` + `events`, always followed by `unbind`) and you press ONE button. Only one distinct remote may be heard, otherwise you retry.
+  * **Create a virtual transmitter** (recommended for doors, works with rolling codes): you pick the protocol (list from the web service), the web service builds a new transmitter (`/channels/build`), you put the receiver in programming mode, and a `PROG` command is sent. The transmitter is independent from your other remotes and can be revoked on the receiver alone.
+  * Then name the device, choose its type and whether it is **secure** (PIN vault). Secure devices are sealed immediately; nothing is stored in clear text.
+* **Remove a device** destroys its sealed secrets (also remove the transmitter from the receiver to revoke it radio-side).
+* **Change vault PIN** re-wraps the vault key; the old PIN is required.
+
+Natively paired devices survive a YAML reconfiguration.
+
+### Audit and alerts
+The vault fires `airsend_vault_event` on the Home Assistant event bus: `sealed`, `unlocked`, `command_authorized`, `pin_failed`, `pin_locked`, `pin_changed`, `removed` (fields `type`, `device`; never the PIN or secrets). Three or more wrong PINs raise a persistent notification. Use these events for mobile notifications.
+
+### Not verified on real hardware (please report)
+This release was written from the AirSendWebService OpenAPI file and unit-tested against a simulated server only. Unconfirmed on a real box: the body accepted by `POST /channels/build` (the code sends `{"id": <protocol>}` and expects a channel with a `source`), the exact content of `GET /airsend/events`, whether `PROG` pairs your receiver model, and how rolling-code counters evolve. If a step fails, the wizard shows an error and nothing is stored. Never test on a door you cannot manually override.
+
+### Threat model
+Protects: configuration files, backups and entity attributes (radio address, locator and API key are encrypted; a stolen backup without the pepper file cannot be brute-forced), and remote use of the door from HA without the PIN (one-shot authorization, lockout, audit).
+Does not protect: someone cloning your physical remote, an attacker with live root access on the host while a command is sent, or the plaintext secrets you leave in `airsend.yaml` or `secrets.yaml`.
+

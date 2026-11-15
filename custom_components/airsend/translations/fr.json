@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Configurer AirSend",
-        "description": "Le fichier `airsend.yaml` doit être présent dans `/config`.\nL'URL interne est auto-détectée si l'addon AirSend est installé.",
+        "description": "Le fichier `airsend.yaml` peut être présent (facultatif) dans `/config`.\nL'URL interne est auto-détectée si l'addon AirSend est installé.",
         "data": {
           "internal_url": "URL interne (ex: http://172.30.33.4:33863/)"
         }
@@ -102,6 +102,128 @@
           "name": "PIN",
           "description": "PIN du coffre-fort."
         }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AirSend",
+        "menu_options": {
+          "pair": "Appairer un nouvel appareil",
+          "remove_device": "Supprimer un appareil",
+          "change_pin": "Changer le PIN du coffre-fort"
+        }
+      },
+      "pair": {
+        "title": "Connexion au boîtier AirSend",
+        "description": "Saisissez le localisateur du boîtier (`spurl`, ex. `sp://motdepasse@[fe80::...]?gw=0&rhost=192.168.x.x`) et choisissez le mode d'appairage.",
+        "data": {
+          "spurl": "Localisateur (spurl)",
+          "mode": "Mode d'appairage"
+        }
+      },
+      "capture_ready": {
+        "title": "Capturer une télécommande",
+        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande dans les {seconds} secondes, près du boîtier AirSend. Seules les télécommandes à code fixe peuvent être capturées ; pour un code tournant, utilisez l'émetteur virtuel."
+      },
+      "capture": {
+        "title": "Écoute"
+      },
+      "virtual_protocol": {
+        "title": "Choisir le protocole radio",
+        "description": "Choisissez le protocole de votre récepteur (voir l'app AirSend ou sa notice).",
+        "data": {
+          "protocol": "Protocole"
+        }
+      },
+      "virtual_prog": {
+        "title": "Programmer le récepteur",
+        "description": "1. Mettez le récepteur (moteur de porte/portail/volet) en mode programmation selon la notice du fabricant.\n2. Cliquez sur Valider : un nouvel émetteur virtuel est créé et une commande PROG est envoyée.\nLa porte peut bouger."
+      },
+      "virtual_confirm": {
+        "title": "Le récepteur a-t-il confirmé ?",
+        "description": "La plupart des récepteurs bipent, clignotent ou bougent brièvement quand ils acceptent un nouvel émetteur.",
+        "menu_options": {
+          "device": "Oui, continuer",
+          "virtual_prog": "Non, renvoyer PROG"
+        }
+      },
+      "device": {
+        "title": "Appareil",
+        "description": "Un appareil sécurisé a son adresse radio chiffrée et exige le PIN pour être utilisé.",
+        "data": {
+          "name": "Nom",
+          "type": "Type",
+          "invert": "Inverser ouverture/fermeture",
+          "secure": "Sécurisé (coffre-fort à PIN)"
+        }
+      },
+      "seal": {
+        "title": "PIN pour {device}",
+        "description": "Créez le PIN du coffre-fort (6 à 8 chiffres, sans suite triviale) ou saisissez le PIN existant.",
+        "data": {
+          "pin": "PIN",
+          "pin_confirm": "Confirmer le PIN"
+        }
+      },
+      "remove_device": {
+        "title": "Supprimer un appareil",
+        "description": "Supprime l'appareil et détruit ses secrets chiffrés. Retirez aussi l'émetteur du récepteur (UNPROG / mémoire du récepteur) pour le révoquer côté radio.",
+        "data": {
+          "name": "Appareil"
+        }
+      },
+      "change_pin": {
+        "title": "Changer le PIN du coffre-fort",
+        "data": {
+          "old_pin": "PIN actuel",
+          "new_pin": "Nouveau PIN",
+          "new_pin_confirm": "Confirmer le nouveau PIN"
+        }
+      }
+    },
+    "progress": {
+      "listen": "Écoute de la télécommande... appuyez sur UN bouton maintenant."
+    },
+    "error": {
+      "cannot_connect": "Impossible de joindre l'addon AirSend.",
+      "timeout": "L'addon AirSend ne répond pas.",
+      "invalid_spurl": "Le localisateur (spurl) est refusé par le boîtier.",
+      "invalid_input": "L'addon a refusé la requête.",
+      "server_error": "L'addon a renvoyé une erreur.",
+      "bad_response": "Réponse inattendue de l'addon (l'API d'appairage peut différer selon votre version).",
+      "no_frame": "Aucune trame radio valide reçue. Réessayez plus près du boîtier.",
+      "multiple_frames": "Plusieurs télécommandes différentes ont été entendues. Réessayez avec une seule à proximité.",
+      "name_invalid": "Nom vide ou déjà utilisé.",
+      "pin_mismatch": "Les deux saisies du PIN sont différentes.",
+      "weak_pin": "Le PIN doit comporter 6 à 8 chiffres et ne pas être une suite triviale.",
+      "invalid_pin": "PIN incorrect.",
+      "pin_locked": "Trop d'échecs. Réessayez plus tard."
+    },
+    "abort": {
+      "nothing_to_remove": "Aucun appareil appairé nativement ou sécurisé à supprimer.",
+      "cannot_connect": "Impossible de joindre l'addon AirSend.",
+      "timeout": "L'addon AirSend ne répond pas.",
+      "invalid_spurl": "Le localisateur (spurl) est refusé par le boîtier.",
+      "invalid_input": "L'addon a refusé la requête.",
+      "server_error": "L'addon a renvoyé une erreur.",
+      "bad_response": "Réponse inattendue de l'addon."
+    }
+  },
+  "selector": {
+    "pair_mode": {
+      "options": {
+        "capture": "Capturer une télécommande existante (code fixe)",
+        "virtual": "Créer un émetteur virtuel (code tournant, recommandé pour les portes)"
+      }
+    },
+    "device_type": {
+      "options": {
+        "cover": "Volet / porte de garage / portail",
+        "switch": "Prise / interrupteur",
+        "button": "Bouton",
+        "light": "Lumière"
       }
     }
   }

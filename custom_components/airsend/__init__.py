@@ -146,7 +146,7 @@ def load_airsend_yaml(hass: HomeAssistant) -> dict:
     path = os.path.join(config_dir, "airsend.yaml")
 
     if not os.path.exists(path):
-        _LOGGER.error("airsend.yaml not found at %s", path)
+        _LOGGER.info("airsend.yaml not found at %s (optional)", path)
         return {}
 
     secrets = {}

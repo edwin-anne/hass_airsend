@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Set up AirSend",
-        "description": "The `airsend.yaml` file must be present in `/config`.\nThe internal URL is auto-detected if the AirSend addon is running.",
+        "description": "The `airsend.yaml` file can be present (optional) in `/config`.\nThe internal URL is auto-detected if the AirSend addon is running.",
         "data": {
           "internal_url": "Internal URL (e.g. http://172.30.33.4:33863/)"
         }
@@ -102,6 +102,128 @@
           "name": "PIN",
           "description": "Vault PIN."
         }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AirSend",
+        "menu_options": {
+          "pair": "Pair a new device",
+          "remove_device": "Remove a device",
+          "change_pin": "Change vault PIN"
+        }
+      },
+      "pair": {
+        "title": "Connect to the AirSend box",
+        "description": "Enter the box locator (`spurl`, like `sp://password@[fe80::...]?gw=0&rhost=192.168.x.x`) and choose how to pair.",
+        "data": {
+          "spurl": "Locator (spurl)",
+          "mode": "Pairing mode"
+        }
+      },
+      "capture_ready": {
+        "title": "Capture a remote",
+        "description": "Click Submit, then press ONE button of your remote within {seconds} seconds, close to the AirSend box. Only fixed-code remotes can be captured; for rolling-code remotes use the virtual transmitter mode."
+      },
+      "capture": {
+        "title": "Listening"
+      },
+      "virtual_protocol": {
+        "title": "Choose the radio protocol",
+        "description": "Pick the protocol of your receiver (see the AirSend app or its manual).",
+        "data": {
+          "protocol": "Protocol"
+        }
+      },
+      "virtual_prog": {
+        "title": "Program the receiver",
+        "description": "1. Put the receiver (door/gate/shutter motor) in programming mode as described by its manufacturer.\n2. Click Submit: a new virtual transmitter is created and a PROG command is sent.\nThe door may move."
+      },
+      "virtual_confirm": {
+        "title": "Did the receiver acknowledge?",
+        "description": "Most receivers beep, blink or briefly move when they accept a new transmitter.",
+        "menu_options": {
+          "device": "Yes, continue",
+          "virtual_prog": "No, send PROG again"
+        }
+      },
+      "device": {
+        "title": "Device",
+        "description": "Secure devices have their radio address encrypted and need the PIN to be used.",
+        "data": {
+          "name": "Name",
+          "type": "Type",
+          "invert": "Invert open/close",
+          "secure": "Secure (PIN vault)"
+        }
+      },
+      "seal": {
+        "title": "PIN for {device}",
+        "description": "Create the vault PIN (6-8 digits, no trivial sequence) or enter the existing one.",
+        "data": {
+          "pin": "PIN",
+          "pin_confirm": "Confirm PIN"
+        }
+      },
+      "remove_device": {
+        "title": "Remove a device",
+        "description": "Removes the device and destroys its sealed secrets. Also remove the transmitter from the receiver (UNPROG / receiver memory) to revoke it radio-side.",
+        "data": {
+          "name": "Device"
+        }
+      },
+      "change_pin": {
+        "title": "Change vault PIN",
+        "data": {
+          "old_pin": "Current PIN",
+          "new_pin": "New PIN",
+          "new_pin_confirm": "Confirm new PIN"
+        }
+      }
+    },
+    "progress": {
+      "listen": "Listening for a remote... press ONE button now."
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the AirSend add-on.",
+      "timeout": "The AirSend add-on does not answer.",
+      "invalid_spurl": "The locator (spurl) is rejected by the box.",
+      "invalid_input": "The add-on refused the request.",
+      "server_error": "The add-on returned an error.",
+      "bad_response": "Unexpected answer from the add-on (the pairing API may differ on your version).",
+      "no_frame": "No valid radio frame received. Try again closer to the box.",
+      "multiple_frames": "Several different remotes were heard. Retry with only one remote nearby.",
+      "name_invalid": "Name empty or already used.",
+      "pin_mismatch": "The two PIN entries differ.",
+      "weak_pin": "PIN must be 6 to 8 digits and not a trivial sequence.",
+      "invalid_pin": "Wrong PIN.",
+      "pin_locked": "Too many failed attempts. Try again later."
+    },
+    "abort": {
+      "nothing_to_remove": "No natively paired or secure device to remove.",
+      "cannot_connect": "Cannot reach the AirSend add-on.",
+      "timeout": "The AirSend add-on does not answer.",
+      "invalid_spurl": "The locator (spurl) is rejected by the box.",
+      "invalid_input": "The add-on refused the request.",
+      "server_error": "The add-on returned an error.",
+      "bad_response": "Unexpected answer from the add-on."
+    }
+  },
+  "selector": {
+    "pair_mode": {
+      "options": {
+        "capture": "Capture an existing remote (fixed code)",
+        "virtual": "Create a virtual transmitter (rolling code, recommended for doors)"
+      }
+    },
+    "device_type": {
+      "options": {
+        "cover": "Cover / garage door / gate",
+        "switch": "Switch",
+        "button": "Button",
+        "light": "Light"
       }
     }
   }
