@@ -45,13 +45,14 @@ CAPTURE_WINDOW_SECONDS = 60
 
 
 def _select(options: list[tuple[str, str]], translation_key: str | None = None):
-    return SelectSelector(
-        SelectSelectorConfig(
-            options=[SelectOptionDict(value=v, label=l) for v, l in options],
-            mode=SelectSelectorMode.DROPDOWN,
-            translation_key=translation_key,
-        )
-    )
+    config: dict = {
+        "options": [SelectOptionDict(value=v, label=l) for v, l in options],
+        "mode": SelectSelectorMode.DROPDOWN,
+    }
+    # HA's schema requires a string here: the key must be absent, never None.
+    if translation_key:
+        config["translation_key"] = translation_key
+    return SelectSelector(SelectSelectorConfig(**config))
 
 
 class AirSendOptionsFlow(config_entries.OptionsFlow):

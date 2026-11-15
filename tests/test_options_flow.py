@@ -63,7 +63,12 @@ def of():
     _stub("homeassistant.helpers.dispatcher", async_dispatcher_send=MagicMock())
     _stub("homeassistant.helpers.event", async_call_later=MagicMock())
     _stub("homeassistant.helpers.storage", Store=MagicMock())
-    sel = lambda *a, **k: MagicMock()  # noqa: E731
+    def sel(*_a, **kw):
+        # Mirror HA's schema: translation_key must be a string when present.
+        if "translation_key" in kw and not isinstance(kw["translation_key"], str):
+            raise ValueError("string value is None at 'translation_key'")
+        return MagicMock()
+
     _stub(
         "homeassistant.helpers.selector",
         SelectOptionDict=dict, SelectSelector=sel, SelectSelectorConfig=sel,
@@ -186,3 +191,22 @@ def test_unexpected_error_gives_location_and_notification(of, monkeypatch):
     assert of._test_notification.call_count == 1
     text = of._test_notification.call_args.args[1]
     assert "kaboom" in text and "111111" not in text and "sp://" not in text
+
+
+def test_selectors_never_pass_none_translation_key(of):
+    of._select([("a", "A")])  # no key
+    of._select([("a", "A")], "pair_mode")  # with key
+
+
+def test_capture_choose_form_builds_with_strict_selector(of):
+    flow = make_flow(of)
+    flow._candidate_labels = {"0": "EV1527 \u00b7 ...1111 \u00b7 x3", "1": "EV1527 \u00b7 ...2222 \u00b7 x1"}
+    form = run(flow.async_step_capture_choose())
+    assert form["type"] == "form" and form["step_id"] == "capture_choose"
+
+
+def test_remove_device_form_builds_with_strict_selector(of):
+    flow = make_flow(of)
+    flow.config_entry.data = {"internal_url": "x", "devices": {"Garage": {"native": True, "secure": True}}}
+    form = run(flow.async_step_remove_device())
+    assert form["type"] == "form" and form["step_id"] == "remove_device"
