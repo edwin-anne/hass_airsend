@@ -125,21 +125,14 @@
       },
       "capture_ready": {
         "title": "Capturer une télécommande",
-        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande dans les {seconds} secondes, près du boîtier AirSend. Seules les télécommandes à code fixe peuvent être capturées ; pour un code tournant, utilisez l'émetteur virtuel."
+        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande dans les {seconds} secondes, près du boîtier AirSend. En mode « code fixe », cette télécommande est utilisée telle quelle."
       },
       "capture": {
         "title": "Écoute"
       },
-      "virtual_protocol": {
-        "title": "Choisir le protocole radio",
-        "description": "Choisissez le protocole de votre récepteur (voir l'app AirSend ou sa notice).",
-        "data": {
-          "protocol": "Protocole"
-        }
-      },
       "virtual_prog": {
         "title": "Programmer le récepteur",
-        "description": "1. Mettez le récepteur (moteur de porte/portail/volet) en mode programmation selon la notice du fabricant.\n2. Cliquez sur Valider : un nouvel émetteur virtuel est créé et une commande PROG est envoyée.\nLa porte peut bouger."
+        "description": "1. Mettez le récepteur (moteur de porte/portail/volet) en mode programmation selon la notice du fabricant.\n2. Cliquez sur Valider : un nouvel émetteur est généré à partir de votre télécommande modèle et une commande PROG est envoyée.\nLa porte peut bouger."
       },
       "virtual_confirm": {
         "title": "Le récepteur a-t-il confirmé ?",
@@ -181,6 +174,10 @@
           "new_pin": "Nouveau PIN",
           "new_pin_confirm": "Confirmer le nouveau PIN"
         }
+      },
+      "capture_ready_model": {
+        "title": "Capturer une télécommande",
+        "description": "Cliquez sur Valider, puis appuyez sur UN bouton de votre télécommande existante dans les {seconds} secondes, près du boîtier AirSend. Elle sert uniquement de MODÈLE pour créer un nouvel émetteur indépendant (code tournant géré) ; elle n'est pas enregistrée."
       }
     },
     "progress": {
@@ -199,7 +196,8 @@
       "pin_mismatch": "Les deux saisies du PIN sont différentes.",
       "weak_pin": "Le PIN doit comporter 6 à 8 chiffres et ne pas être une suite triviale.",
       "invalid_pin": "PIN incorrect.",
-      "pin_locked": "Trop d'échecs. Réessayez plus tard."
+      "pin_locked": "Trop d'échecs. Réessayez plus tard.",
+      "build_same_channel": "Le service a renvoyé le canal modèle au lieu d'un nouveau canal."
     },
     "abort": {
       "nothing_to_remove": "Aucun appareil appairé nativement ou sécurisé à supprimer.",
@@ -208,14 +206,15 @@
       "invalid_spurl": "Le localisateur (spurl) est refusé par le boîtier.",
       "invalid_input": "L'addon a refusé la requête.",
       "server_error": "L'addon a renvoyé une erreur.",
-      "bad_response": "Réponse inattendue de l'addon."
+      "bad_response": "Réponse inattendue de l'addon.",
+      "not_cloneable": "Ce protocole radio ne peut pas être cloné par l'AirSend. Créez plutôt la télécommande dans l'app AirSend et importez-la."
     }
   },
   "selector": {
     "pair_mode": {
       "options": {
-        "capture": "Capturer une télécommande existante (code fixe)",
-        "virtual": "Créer un émetteur virtuel (code tournant, recommandé pour les portes)"
+        "capture": "Utiliser une télécommande existante telle quelle (code fixe)",
+        "virtual": "Créer un nouvel émetteur depuis une télécommande modèle (code tournant, recommandé pour les portes)"
       }
     },
     "device_type": {

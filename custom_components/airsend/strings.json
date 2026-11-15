@@ -125,21 +125,14 @@
       },
       "capture_ready": {
         "title": "Capture a remote",
-        "description": "Click Submit, then press ONE button of your remote within {seconds} seconds, close to the AirSend box. Only fixed-code remotes can be captured; for rolling-code remotes use the virtual transmitter mode."
+        "description": "Click Submit, then press ONE button of your remote within {seconds} seconds, close to the AirSend box. In 'fixed code' mode this remote is used as is."
       },
       "capture": {
         "title": "Listening"
       },
-      "virtual_protocol": {
-        "title": "Choose the radio protocol",
-        "description": "Pick the protocol of your receiver (see the AirSend app or its manual).",
-        "data": {
-          "protocol": "Protocol"
-        }
-      },
       "virtual_prog": {
         "title": "Program the receiver",
-        "description": "1. Put the receiver (door/gate/shutter motor) in programming mode as described by its manufacturer.\n2. Click Submit: a new virtual transmitter is created and a PROG command is sent.\nThe door may move."
+        "description": "1. Put the receiver (door/gate/shutter motor) in programming mode as described by its manufacturer.\n2. Click Submit: a new transmitter is generated from your model remote and a PROG command is sent.\nThe door may move."
       },
       "virtual_confirm": {
         "title": "Did the receiver acknowledge?",
@@ -181,6 +174,10 @@
           "new_pin": "New PIN",
           "new_pin_confirm": "Confirm new PIN"
         }
+      },
+      "capture_ready_model": {
+        "title": "Capture a remote",
+        "description": "Click Submit, then press ONE button of your existing remote within {seconds} seconds, close to the AirSend box. It is only used as a MODEL to create a new, independent transmitter (rolling code supported); it is not stored."
       }
     },
     "progress": {
@@ -199,7 +196,8 @@
       "pin_mismatch": "The two PIN entries differ.",
       "weak_pin": "PIN must be 6 to 8 digits and not a trivial sequence.",
       "invalid_pin": "Wrong PIN.",
-      "pin_locked": "Too many failed attempts. Try again later."
+      "pin_locked": "Too many failed attempts. Try again later.",
+      "build_same_channel": "The service returned the model channel instead of a new one."
     },
     "abort": {
       "nothing_to_remove": "No natively paired or secure device to remove.",
@@ -208,14 +206,15 @@
       "invalid_spurl": "The locator (spurl) is rejected by the box.",
       "invalid_input": "The add-on refused the request.",
       "server_error": "The add-on returned an error.",
-      "bad_response": "Unexpected answer from the add-on."
+      "bad_response": "Unexpected answer from the add-on.",
+      "not_cloneable": "This radio protocol cannot be cloned by the AirSend. Create the remote in the AirSend app instead and import it."
     }
   },
   "selector": {
     "pair_mode": {
       "options": {
-        "capture": "Capture an existing remote (fixed code)",
-        "virtual": "Create a virtual transmitter (rolling code, recommended for doors)"
+        "capture": "Use an existing remote as is (fixed code)",
+        "virtual": "Create a new transmitter from a model remote (rolling code, recommended for doors)"
       }
     },
     "device_type": {

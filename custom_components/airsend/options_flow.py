@@ -28,7 +28,6 @@ from .enroll import (
     PROG_NOTE,
     AirSendApi,
     AirSendApiError,
-    describe_protocol,
 )
 from .vault import InvalidPin, PinLocked, WeakPin
 from .vault_store import get_vault_manager
@@ -58,7 +57,7 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         self._spurl = ""
         self._mode = "capture"
         self._channel: dict | None = None
-        self._protocol: int | None = None
+        self._model: dict | None = None
         self._task: asyncio.Task | None = None
         self._pending_device: dict | None = None
         self._capture_error: str | None = None
@@ -168,8 +167,6 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
             except AirSendApiError as err:
                 errors["base"] = err.code
             else:
-                if self._mode == "virtual":
-                    return await self.async_step_virtual_protocol()
                 return await self.async_step_capture_ready()
         return self.async_show_form(
             step_id="pair",
@@ -185,11 +182,14 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         )
 
     # -- mode A: capture an existing remote -----------------------------
+    async def async_step_capture_ready_model(self, user_input=None):
+        return await self.async_step_capture_ready(user_input)
+
     async def async_step_capture_ready(self, user_input=None):
         if user_input is not None:
             return await self.async_step_capture()
         return self.async_show_form(
-            step_id="capture_ready",
+            step_id="capture_ready_model" if self._mode == "virtual" else "capture_ready",
             data_schema=vol.Schema({}),
             description_placeholders={
                 "seconds": str(CAPTURE_WINDOW_SECONDS),
@@ -236,35 +236,27 @@ class AirSendOptionsFlow(config_entries.OptionsFlow):
         if len(candidates) > 1:
             self._capture_error = "multiple_frames"
             return await self.async_step_capture_ready()
+        if self._mode == "virtual":
+            # The captured remote is only a MODEL for /channels/build: never stored.
+            self._model = candidates[0]
+            self._channel = None
+            info = await self._api().protocol_info(self._model["id"])
+            if info is not None and info["cloneable"] is False:
+                self._model = None
+                return self.async_abort(reason="not_cloneable")
+            return await self.async_step_virtual_prog()
         self._channel = candidates[0]
         return await self.async_step_device()
 
     # -- mode B: virtual transmitter ------------------------------------
-    async def async_step_virtual_protocol(self, user_input=None):
-        errors = {}
-        try:
-            channels = await self._api().list_channels()
-        except AirSendApiError as err:
-            return self.async_abort(reason=err.code)
-        if user_input is not None:
-            self._protocol = int(user_input["protocol"])
-            self._channel = None
-            return await self.async_step_virtual_prog()
-        options = [(str(c["id"]), describe_protocol(c)) for c in channels]
-        options.sort(key=lambda o: o[1].lower())
-        return self.async_show_form(
-            step_id="virtual_protocol",
-            data_schema=vol.Schema({vol.Required("protocol"): _select(options)}),
-            errors=errors,
-        )
-
     async def async_step_virtual_prog(self, user_input=None):
         errors = {}
         if user_input is not None:
             api = self._api()
             try:
                 if self._channel is None:
-                    self._channel = await api.build_channel(self._protocol)
+                    self._channel = await api.build_channel(self._model)
+                    self._model = None  # the model remote is discarded
                 await api.send_note(self._channel, PROG_NOTE)
             except AirSendApiError as err:
                 errors["base"] = err.code

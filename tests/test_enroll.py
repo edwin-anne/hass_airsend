@@ -34,10 +34,16 @@ def make_app(state):
         return web.json_response([{"id": 808, "name": "EV1527", "band": 433, "counter": 0, "clone": 3}])
 
     async def build(request):
-        state["build_body"] = await request.json()
+        body = await request.json()
+        state.setdefault("build_bodies", []).append(body)
+        state["build_body"] = body
         if state.get("build_bad"):
             return web.json_response({"nope": 1})
-        return web.json_response({"id": 808, "source": 5551234, "counter": 1, "mac": 9, "seed": 4, "x": "dropped"})
+        if state.get("build_needs_id_only") and set(body) != {"id"}:
+            raise web.HTTPMethodNotAllowed("POST", ["GET"])
+        if state.get("build_echo"):
+            return web.json_response(body)
+        return web.json_response({"id": body["id"], "source": 5551234, "counter": 1, "mac": 9, "seed": 4, "x": "dropped"})
 
     async def bind(request):
         need_auth(request)
@@ -84,19 +90,20 @@ def test_list_and_build():
 
     async def go(api):
         chans = await api.list_channels()
-        built = await api.build_channel(808)
+        built = await api.build_channel({"id": 808, "source": 77, "counter": 5, "seed": 3, "junk": 1})
         return chans, built
 
     chans, built = run(with_api(state, go))
     assert chans[0]["name"] == "EV1527"
-    assert state["build_body"] == {"id": 808}
+    # the whole model channel (documented fields only) is sent to the service
+    assert state["build_body"] == {"id": 808, "source": 77, "counter": 5, "seed": 3}
     assert built == {"id": 808, "source": 5551234, "counter": 1, "mac": 9, "seed": 4}
 
 
 def test_build_bad_response():
     async def go(api):
         with pytest.raises(enroll.AirSendApiError):
-            await api.build_channel(808)
+            await api.build_channel({"id": 808, "source": 1})
 
     run(with_api({"build_bad": True}, go))
 
@@ -225,3 +232,44 @@ def test_diagnostic_without_events_and_without_secrets():
 
 def test_errors_are_ignored_by_loose_fallback():
     assert enroll.pick_loose_candidates([{"type": 0x105, "channel": {"id": 1, "source": 2}}]) == []
+
+
+def test_build_same_channel_is_rejected():
+    async def go(api):
+        with pytest.raises(enroll.AirSendApiError) as exc:
+            await api.build_channel({"id": 808, "source": 5551234, "mac": 9, "seed": 4, "counter": 1})
+        assert exc.value.code == "build_same_channel"
+
+    run(with_api({"build_echo": True}, go))
+
+
+def test_build_falls_back_to_id_only_on_405():
+    state = {"build_needs_id_only": True}
+
+    async def go(api):
+        return await api.build_channel({"id": 808, "source": 77})
+
+    built = run(with_api(state, go))
+    assert state["build_bodies"] == [{"id": 808, "source": 77}, {"id": 808}]
+    assert built["source"] == 5551234
+
+
+def test_normalize_protocol_both_api_generations():
+    new = enroll.normalize_protocol({"id": 1, "name": "A", "band": 433, "hasCounter": True,
+                                     "isCopyable": False, "isCloneable": True})
+    assert (new["rolling"], new["copyable"], new["cloneable"]) == (True, False, True)
+    old = enroll.normalize_protocol({"id": 2, "counter": 2, "clone": 1})
+    assert (old["rolling"], old["cloneable"], old["copyable"]) == (True, False, None)
+    old_full = enroll.normalize_protocol({"id": 3, "counter": 0, "clone": 3})
+    assert (old_full["rolling"], old_full["cloneable"]) == (False, True)
+    unknown = enroll.normalize_protocol({"id": 4})
+    assert unknown["rolling"] is None and unknown["cloneable"] is None
+    assert "rolling code" in enroll.describe_protocol({"id": 1, "name": "A", "band": 868, "hasCounter": True})
+
+
+def test_protocol_info_lookup():
+    async def go(api):
+        assert (await api.protocol_info(808))["cloneable"] is True
+        assert await api.protocol_info(999) is None
+
+    run(with_api({}, go))

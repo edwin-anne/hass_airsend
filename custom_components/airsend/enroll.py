@@ -40,11 +40,37 @@ def normalize_channel(channel: dict) -> dict:
     return {k: channel[k] for k in CHANNEL_KEYS if channel.get(k) is not None}
 
 
+def normalize_protocol(info: dict) -> dict:
+    """Normalize a ChannelInfo item across both API generations.
+
+    Old: ``counter`` (0 none/1 need/2 required/3 conditional) and ``clone``
+    (0 none/1 unavailable/2 temporary/3 full). New: ``hasCounter``,
+    ``isCopyable``, ``isCloneable`` booleans. ``None`` means "not reported".
+    """
+    rolling = info.get("hasCounter")
+    if rolling is None and isinstance(info.get("counter"), int):
+        rolling = info["counter"] > 0
+    cloneable = info.get("isCloneable")
+    if cloneable is None and isinstance(info.get("clone"), int):
+        cloneable = info["clone"] >= 2
+    return {
+        "id": info.get("id"),
+        "name": info.get("name"),
+        "band": info.get("band"),
+        "rolling": rolling,
+        "copyable": info.get("isCopyable"),
+        "cloneable": cloneable,
+    }
+
+
 def describe_protocol(info: dict) -> str:
     """Human label for a ChannelInfo item."""
-    parts = [str(info.get("name") or info.get("id"))]
-    if info.get("band"):
-        parts.append(f"{info['band']} MHz")
+    proto = normalize_protocol(info)
+    parts = [str(proto["name"] or proto["id"])]
+    if proto["band"]:
+        parts.append(f"{proto['band']} MHz")
+    if proto["rolling"]:
+        parts.append("rolling code")
     return " - ".join(parts)
 
 
@@ -164,14 +190,43 @@ class AirSendApi:
             raise AirSendApiError("bad_response")
         return [c for c in data if isinstance(c, dict) and "id" in c]
 
-    async def build_channel(self, channel_id: int) -> dict:
-        """Create a new (virtual transmitter) channel from a protocol id."""
-        data = await self._request("POST", "channels/build", {"id": int(channel_id)}, auth=False)
+    async def protocol_info(self, channel_id: int) -> dict | None:
+        """Normalized capabilities of a protocol, or None when unknown/unreachable."""
+        try:
+            for info in await self.list_channels():
+                if info.get("id") == channel_id:
+                    return normalize_protocol(info)
+        except AirSendApiError:
+            return None
+        return None
+
+    async def build_channel(self, model: dict) -> dict:
+        """Create a NEW transmitter channel from a model channel.
+
+        The service documents ``/channels/build`` as "generate and build a new
+        channel from another channel": the model is a full Channel (id, source,
+        counter/mac/seed). The model itself is never stored by the caller.
+        """
+        model = normalize_channel(model)
+        try:
+            data = await self._request("POST", "channels/build", model, auth=False)
+        except AirSendApiError as err:
+            if err.status != 405 or set(model) == {"id"}:
+                raise
+            # Some versions may only want the protocol id.
+            data = await self._request("POST", "channels/build", {"id": model["id"]}, auth=False)
         if not isinstance(data, dict) or "id" not in data:
             raise AirSendApiError("bad_response")
         channel = normalize_channel(data)
         if "source" not in channel:
             raise AirSendApiError("bad_response")
+        if (
+            model.get("source") is not None
+            and channel.get("source") == model.get("source")
+            and channel.get("mac") == model.get("mac")
+            and channel.get("seed") == model.get("seed")
+        ):
+            raise AirSendApiError("build_same_channel")
         return channel
 
     async def bind(self, callback: str = "http://127.0.0.1/") -> None:
